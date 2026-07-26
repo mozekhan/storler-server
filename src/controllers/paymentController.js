@@ -202,7 +202,6 @@
 
 
 
-// controllers/paymentController.js - Updated
 
 const PaymentService = require("../services/paymentService");
 

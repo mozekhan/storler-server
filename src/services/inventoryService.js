@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Inventory = require("../models/Inventory");
 const Product = require("../models/Product");
 const BaseService = require("./baseService");
@@ -219,8 +220,19 @@ class InventoryService extends BaseService {
    * Get inventory summary
    */
   async getInventorySummary(storeId) {
+    // Extract ObjectId if a Store document was passed
+    const storeObjectId = storeId?._id
+      ? new mongoose.Types.ObjectId(storeId._id)
+      : new mongoose.Types.ObjectId(storeId);
+
+    console.log("Using storeId:", storeObjectId);
+
     const stats = await Inventory.aggregate([
-      { $match: { storeId } },
+      {
+        $match: {
+          storeId: storeObjectId,
+        },
+      },
       {
         $group: {
           _id: null,
@@ -239,6 +251,8 @@ class InventoryService extends BaseService {
         },
       },
     ]);
+
+    console.log("Aggregation Result:", stats);
 
     return (
       stats[0] || {

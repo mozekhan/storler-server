@@ -430,12 +430,6 @@ class PaymentService extends BaseService {
     // Debug
     const payments = await Payment.find(matchQuery).lean();
 
-    console.log(`Payments Found: ${payments.length}`);
-
-    if (payments.length) {
-      console.log("First Payment:", payments[0]);
-    }
-
     const [byMethod, totals, refunds] = await Promise.all([
       Payment.aggregate([
         {
