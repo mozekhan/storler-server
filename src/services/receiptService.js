@@ -1,3 +1,1640 @@
+// // services/receiptService.js
+// const PDFGenerator = require("../utils/pdfGenerator");
+// const Receipt = require("../models/Receipt");
+// const BaseService = require("./baseService");
+// const QRService = require("./qrService");
+// const { AppError } = require("../middleware/errorHandler");
+// const path = require("path");
+// const fs = require("fs");
+
+// class ReceiptService extends BaseService {
+//   /**
+//    * Generate receipt data for a transaction
+//    */
+//   async generateReceiptData(transaction, type = "SALES") {
+//     const populatedTransaction = await this._populateTransaction(transaction);
+
+//     // Build items array from Transaction.items (which are ObjectIds referencing TransactionItem)
+//     const items = [];
+//     if (populatedTransaction.items && populatedTransaction.items.length > 0) {
+//       for (const itemRef of populatedTransaction.items) {
+//         // If items are populated, they should be TransactionItem documents
+//         if (itemRef._id) {
+//           // Check if it's a populated TransactionItem
+//           const product = itemRef.productId || {};
+//           items.push({
+//             id: itemRef._id,
+//             productId: product._id || itemRef.productId,
+//             sku: itemRef.sku || product.sku || "",
+//             name: itemRef.name || product.name || "Item",
+//             quantity: itemRef.quantity || 0,
+//             unitPrice: itemRef.unitPrice || 0,
+//             totalPrice: itemRef.totalPrice || 0,
+//             taxRate: itemRef.taxRate || product.taxRate || 0,
+//             taxAmount: itemRef.taxAmount || 0,
+//             discountAmount: itemRef.discountAmount || 0,
+//             discountPercentage: itemRef.discountPercentage || 0,
+//             warehouseLocation: itemRef.warehouseLocation || {},
+//             isReleased: itemRef.isReleased || false,
+//             releasedQuantity: itemRef.releasedQuantity || 0,
+//             product: product._id
+//               ? {
+//                   name: product.name,
+//                   sku: product.sku,
+//                   description: product.description,
+//                   category: product.category,
+//                   brand: product.brand,
+//                 }
+//               : null,
+//           });
+//         }
+//       }
+//     }
+
+//     // Build released items from Transaction.itemsReleased
+//     const releasedItems = (populatedTransaction.itemsReleased || []).map(
+//       (item) => {
+//         const releasedBy = item.releasedBy || {};
+//         return {
+//           productId: item.productId?._id || item.productId,
+//           productName: item.productName || "",
+//           sku: item.sku || "",
+//           quantityReleased: item.quantityReleased || 0,
+//           unitPrice: item.unitPrice || 0,
+//           totalPrice: item.totalPrice || 0,
+//           releasedBy: item.releasedBy?._id || item.releasedBy,
+//           releasedAt: item.releasedAt,
+//           releasedByName: releasedBy._id
+//             ? `${releasedBy.firstName || ""} ${releasedBy.lastName || ""}`.trim()
+//             : "N/A",
+//         };
+//       },
+//     );
+
+//     // Get store data (safe access)
+//     const store = populatedTransaction.storeId || {};
+//     const storeAddress = store.address || {};
+
+//     const receiptData = {
+//       receiptType: type,
+//       generatedAt: new Date().toISOString(),
+//       version: "1.0",
+
+//       // Store Information - MATCHES Store schema
+//       store: {
+//         id: store._id,
+//         name: store.name || "Store",
+//         address: storeAddress.street || "",
+//         city: storeAddress.city || "",
+//         state: storeAddress.state || "",
+//         country: storeAddress.country || "",
+//         zipCode: storeAddress.zipCode || "",
+//         phone: store.phone || "",
+//         email: store.email || "",
+//         taxRate: store.taxRate || 0,
+//         currency: store.currency || "USD",
+//         receiptFooter: store.receiptFooter || "Thank you for your business!",
+//       },
+
+//       // Transaction Information - MATCHES Transaction schema
+//       transaction: {
+//         id: populatedTransaction._id,
+//         number: populatedTransaction.transactionNumber,
+//         invoiceNumber: populatedTransaction.finalInvoiceNumber || "",
+//         status: populatedTransaction.status,
+//         createdAt: populatedTransaction.createdAt,
+//         updatedAt: populatedTransaction.updatedAt,
+//         salesTimestamp: populatedTransaction.salesTimestamp,
+//         paymentTimestamp: populatedTransaction.paymentTimestamp,
+//         releaseTimestamp: populatedTransaction.releaseTimestamp,
+//       },
+
+//       // Items - MATCHES TransactionItem schema
+//       items: items,
+
+//       // Released Items - MATCHES Transaction.itemsReleased schema
+//       releasedItems: releasedItems,
+
+//       // Financial Summary - MATCHES Transaction schema
+//       summary: {
+//         subtotal: populatedTransaction.subtotal || 0,
+//         taxTotal: populatedTransaction.taxTotal || 0,
+//         discountTotal: populatedTransaction.discountTotal || 0,
+//         totalAmount: populatedTransaction.totalAmount || 0,
+//         amountPaid: populatedTransaction.amountPaid || 0,
+//         changeAmount: populatedTransaction.changeAmount || 0,
+//         paymentMethod: populatedTransaction.paymentMethod || "N/A",
+//       },
+
+//       // Staff Information - MATCHES populated User schema
+//       staff: {
+//         salesAttendant: populatedTransaction.salesAttendantId
+//           ? {
+//               id: populatedTransaction.salesAttendantId._id,
+//               name: `${populatedTransaction.salesAttendantId.firstName || ""} ${populatedTransaction.salesAttendantId.lastName || ""}`.trim(),
+//               email: populatedTransaction.salesAttendantId.email || "",
+//               phone: populatedTransaction.salesAttendantId.phone || "",
+//               role: populatedTransaction.salesAttendantId.role || "",
+//             }
+//           : null,
+//         financeAttendant: populatedTransaction.financeAttendantId
+//           ? {
+//               id: populatedTransaction.financeAttendantId._id,
+//               name: `${populatedTransaction.financeAttendantId.firstName || ""} ${populatedTransaction.financeAttendantId.lastName || ""}`.trim(),
+//               email: populatedTransaction.financeAttendantId.email || "",
+//               phone: populatedTransaction.financeAttendantId.phone || "",
+//               role: populatedTransaction.financeAttendantId.role || "",
+//             }
+//           : null,
+//         warehouseStaff: populatedTransaction.warehouseStaffId
+//           ? {
+//               id: populatedTransaction.warehouseStaffId._id,
+//               name: `${populatedTransaction.warehouseStaffId.firstName || ""} ${populatedTransaction.warehouseStaffId.lastName || ""}`.trim(),
+//               email: populatedTransaction.warehouseStaffId.email || "",
+//               phone: populatedTransaction.warehouseStaffId.phone || "",
+//               role: populatedTransaction.warehouseStaffId.role || "",
+//             }
+//           : null,
+//       },
+
+//       // Timeline - MATCHES Transaction timestamps
+//       timeline: {
+//         created: populatedTransaction.createdAt,
+//         sales: populatedTransaction.salesTimestamp,
+//         payment: populatedTransaction.paymentTimestamp,
+//         release: populatedTransaction.releaseTimestamp,
+//         updated: populatedTransaction.updatedAt,
+//       },
+
+//       // QR Codes - MATCHES Transaction QR fields
+//       qrCodes: {
+//         salesQR: populatedTransaction.salesQR || null,
+//         paymentQR: populatedTransaction.paymentQR || null,
+//         releaseQR: populatedTransaction.releaseQR || null,
+//         invoiceQR: populatedTransaction.invoiceQR || null,
+//         salesQRGeneratedAt: populatedTransaction.salesQRGeneratedAt || null,
+//         paymentQRGeneratedAt: populatedTransaction.paymentQRGeneratedAt || null,
+//         releaseQRGeneratedAt: populatedTransaction.releaseQRGeneratedAt || null,
+//         invoiceQRGeneratedAt: populatedTransaction.invoiceQRGeneratedAt || null,
+//       },
+
+//       // Workflow Status - MATCHES Transaction statuses
+//       workflow: {
+//         salesStatus: populatedTransaction.salesStatus || "PENDING",
+//         paymentStatus: populatedTransaction.paymentStatus || "PENDING",
+//         warehouseStatus: populatedTransaction.warehouseStatus || "PENDING",
+//         status: populatedTransaction.status || "PENDING",
+//       },
+
+//       // Additional Data - safe access for fields that may not exist
+//       additionalData: {
+//         salesReceiptPrinted: populatedTransaction.salesReceiptPrinted || false,
+//         paymentReceiptPrinted:
+//           populatedTransaction.paymentReceiptPrinted || false,
+//         finalInvoicePrinted: populatedTransaction.finalInvoicePrinted || false,
+//       },
+//     };
+
+//     // Cache receipt data on transaction
+//     if (populatedTransaction._id) {
+//       populatedTransaction.receiptData = receiptData;
+//       await populatedTransaction.save();
+//     }
+
+//     // // Create receipt record
+//     //   const receipt = await this.createReceiptRecord(
+//     //     populatedTransaction,
+//     //     type,
+//     //     qrCode,
+//     //     receiptData
+//     //   );
+//     const QRCode = require("qrcode");
+
+//     const qrPayload = {
+//       version: "1.0",
+//       type,
+//       transactionId: populatedTransaction._id.toString(),
+//       storeId: populatedTransaction.storeId._id.toString(),
+//       timestamp: Date.now(),
+//       expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+//       step: type,
+//     };
+
+//     const qrCode = await QRCode.toDataURL(JSON.stringify(qrPayload));
+
+//     const receipt = await this.createReceiptRecord(
+//       populatedTransaction,
+//       type,
+//       qrCode,
+//       receiptData,
+//     );
+
+//     return {
+//       receipt,
+//       receiptData,
+//     };
+//   }
+
+//   async _populateTransaction(transaction) {
+//     if (transaction.populated) {
+//       return transaction;
+//     }
+
+//     // Populate store
+//     await transaction.populate({
+//       path: "storeId",
+//       select: "name address phone email taxRate currency receiptFooter",
+//     });
+
+//     // Populate staff
+//     await transaction.populate({
+//       path: "salesAttendantId",
+//       select: "firstName lastName email phone role",
+//     });
+
+//     await transaction.populate({
+//       path: "financeAttendantId",
+//       select: "firstName lastName email phone role",
+//     });
+
+//     await transaction.populate({
+//       path: "warehouseStaffId",
+//       select: "firstName lastName email phone role",
+//     });
+
+//     // IMPORTANT: Populate items with product details
+//     await transaction.populate({
+//       path: "items",
+//       populate: {
+//         path: "productId",
+//         select: "name sku unitPrice taxRate description category brand",
+//       },
+//     });
+
+//     // Populate released items
+//     await transaction.populate({
+//       path: "itemsReleased.releasedBy",
+//       select: "firstName lastName",
+//     });
+
+//     await transaction.populate({
+//       path: "itemsReleased.productId",
+//       select: "name sku unitPrice",
+//     });
+
+//     transaction.populated = true;
+//     return transaction;
+//   }
+
+//   /**
+//    * Format receipt for printing with enhanced data
+//    */
+//   formatReceiptForPrinting(receiptData) {
+//     const line = "═".repeat(56);
+//     const thinLine = "─".repeat(56);
+//     const width = 56;
+
+//     let receipt = "";
+
+//     // Header
+//     receipt += `${line}\n`;
+//     receipt +=
+//       this._centerText(receiptData.store.name || "STORE", width) + "\n";
+//     receipt += this._centerText(receiptData.store.address || "", width) + "\n";
+//     receipt +=
+//       this._centerText(`Tel: ${receiptData.store.phone || ""}`, width) + "\n";
+//     receipt +=
+//       this._centerText(`Email: ${receiptData.store.email || ""}`, width) + "\n";
+//     if (receiptData.store.taxId) {
+//       receipt +=
+//         this._centerText(`Tax ID: ${receiptData.store.taxId}`, width) + "\n";
+//     }
+//     receipt += `${thinLine}\n`;
+
+//     // Receipt Type
+//     receipt +=
+//       this._centerText(`=== ${receiptData.receiptType} RECEIPT ===`, width) +
+//       "\n";
+//     receipt += `${thinLine}\n`;
+
+//     // Transaction Info
+//     receipt += `Transaction: ${receiptData.transaction.number}\n`;
+//     if (receiptData.transaction.invoiceNumber) {
+//       receipt += `Invoice: ${receiptData.transaction.invoiceNumber}\n`;
+//     }
+//     receipt += `Date: ${new Date(receiptData.transaction.createdAt).toLocaleString()}\n`;
+//     receipt += `Status: ${receiptData.transaction.status}\n`;
+//     receipt += `${thinLine}\n`;
+
+//     // Items
+//     receipt += this._formatItemsSection(receiptData.items);
+
+//     // Released Items (if any)
+//     if (receiptData.releasedItems && receiptData.releasedItems.length > 0) {
+//       receipt += `${thinLine}\n`;
+//       receipt += this._formatReleasedItemsSection(receiptData.releasedItems);
+//     }
+
+//     // Summary
+//     receipt += `${thinLine}\n`;
+//     receipt += this._formatSummarySection(receiptData.summary);
+
+//     // Staff
+//     receipt += `${thinLine}\n`;
+//     receipt += this._formatStaffSection(receiptData.staff);
+
+//     // Timeline
+//     receipt += `${thinLine}\n`;
+//     receipt += this._formatTimelineSection(receiptData.timeline);
+
+//     // Additional Data
+//     if (receiptData.additionalData.notes) {
+//       receipt += `${thinLine}\n`;
+//       receipt += `Notes: ${receiptData.additionalData.notes}\n`;
+//     }
+
+//     // Footer
+//     receipt += `${thinLine}\n`;
+//     receipt +=
+//       this._centerText(
+//         receiptData.store.receiptFooter || "Thank you for your business!",
+//         width,
+//       ) + "\n";
+//     receipt +=
+//       this._centerText("Please keep this receipt for your records", width) +
+//       "\n";
+//     receipt += `${line}\n`;
+
+//     return receipt;
+//   }
+
+//   /**
+//    * Format items section with enhanced details
+//    */
+//   _formatItemsSection(items) {
+//     if (!items || items.length === 0) {
+//       return "No items in this receipt\n";
+//     }
+
+//     let section = "ITEMS\n";
+//     section += "─".repeat(56) + "\n";
+//     section += `${this._padRight("Item", 22)}${this._padRight("Qty", 6)}${this._padRight("Price", 12)}${this._padRight("Tax", 8)}${"Total"}\n`;
+//     section += "─".repeat(56) + "\n";
+
+//     let totalItems = 0;
+//     let totalQuantity = 0;
+
+//     for (const item of items) {
+//       const name =
+//         item.name.length > 22 ? item.name.substring(0, 20) + ".." : item.name;
+//       section += `${this._padRight(name, 22)}${this._padRight(item.quantity.toString(), 6)}${this._padRight("$" + item.unitPrice.toFixed(2), 12)}${this._padRight("$" + item.taxAmount.toFixed(2), 8)}$${item.totalPrice.toFixed(2)}\n`;
+
+//       // Show SKU and discount if applicable
+//       if (item.sku) {
+//         section += `  SKU: ${item.sku}`;
+//         if (item.discountAmount > 0) {
+//           section += ` | Discount: $${item.discountAmount.toFixed(2)}`;
+//         }
+//         if (
+//           item.warehouseLocation &&
+//           (item.warehouseLocation.aisle || item.warehouseLocation.shelf)
+//         ) {
+//           section += ` | Location: ${item.warehouseLocation.aisle || ""}${item.warehouseLocation.shelf ? "-" + item.warehouseLocation.shelf : ""}`;
+//         }
+//         section += "\n";
+//       }
+
+//       totalItems++;
+//       totalQuantity += item.quantity;
+//     }
+
+//     section += "─".repeat(56) + "\n";
+//     section += `${this._padRight(`Total: ${totalItems} items`, 40)}Qty: ${totalQuantity}\n`;
+
+//     return section;
+//   }
+
+//   /**
+//    * Format released items section
+//    */
+//   _formatReleasedItemsSection(releasedItems) {
+//     if (!releasedItems || releasedItems.length === 0) {
+//       return "";
+//     }
+
+//     let section = "RELEASED ITEMS\n";
+//     section += "─".repeat(56) + "\n";
+//     section += `${this._padRight("Item", 22)}${this._padRight("Qty", 6)}${this._padRight("Price", 12)}${"Total"}\n`;
+//     section += "─".repeat(56) + "\n";
+
+//     for (const item of releasedItems) {
+//       const name = item.productName || "Item";
+//       const displayName =
+//         name.length > 22 ? name.substring(0, 20) + ".." : name;
+//       section += `${this._padRight(displayName, 22)}${this._padRight(item.quantityReleased.toString(), 6)}${this._padRight("$" + item.unitPrice.toFixed(2), 12)}$${item.totalPrice.toFixed(2)}\n`;
+//       if (item.releasedByName) {
+//         section += `  Released By: ${item.releasedByName}\n`;
+//       }
+//     }
+
+//     return section;
+//   }
+
+//   /**
+//    * Format summary section with more details
+//    */
+//   _formatSummarySection(summary) {
+//     let section = "SUMMARY\n";
+//     section += "─".repeat(56) + "\n";
+//     section += `Subtotal: ${this._padLeft("$" + summary.subtotal.toFixed(2), 47)}\n`;
+//     section += `Tax: ${this._padLeft("$" + summary.taxTotal.toFixed(2), 52)}\n`;
+//     if (summary.discountTotal > 0) {
+//       section += `Discount: ${this._padLeft("- $" + summary.discountTotal.toFixed(2), 48)}\n`;
+//     }
+//     section += "─".repeat(56) + "\n";
+//     section += `TOTAL: ${this._padLeft("$" + summary.totalAmount.toFixed(2), 50)}\n`;
+//     section += "─".repeat(56) + "\n";
+//     section += `Amount Paid: ${this._padLeft("$" + summary.amountPaid.toFixed(2), 44)}\n`;
+//     section += `Change: ${this._padLeft("$" + summary.changeAmount.toFixed(2), 50)}\n`;
+//     section += `Payment Method: ${summary.paymentMethod}\n`;
+//     if (summary.paymentReference) {
+//       section += `Reference: ${summary.paymentReference}\n`;
+//     }
+//     return section;
+//   }
+
+//   /**
+//    * Format staff section
+//    */
+//   _formatStaffSection(staff) {
+//     let section = "STAFF\n";
+//     section += "─".repeat(56) + "\n";
+
+//     if (staff.salesAttendant) {
+//       section += `Sales: ${staff.salesAttendant.name}`;
+//       if (staff.salesAttendant.email) {
+//         section += ` (${staff.salesAttendant.email})`;
+//       }
+//       section += "\n";
+//     }
+//     if (staff.financeAttendant) {
+//       section += `Finance: ${staff.financeAttendant.name}`;
+//       if (staff.financeAttendant.email) {
+//         section += ` (${staff.financeAttendant.email})`;
+//       }
+//       section += "\n";
+//     }
+//     if (staff.warehouseStaff) {
+//       section += `Warehouse: ${staff.warehouseStaff.name}`;
+//       if (staff.warehouseStaff.email) {
+//         section += ` (${staff.warehouseStaff.email})`;
+//       }
+//       section += "\n";
+//     }
+
+//     return section;
+//   }
+
+//   /**
+//    * Format timeline section
+//    */
+//   _formatTimelineSection(timeline) {
+//     let section = "TIMELINE\n";
+//     section += "─".repeat(56) + "\n";
+
+//     const formatDate = (date) => {
+//       if (!date) return "N/A";
+//       return new Date(date).toLocaleString();
+//     };
+
+//     section += `Created: ${formatDate(timeline.created)}\n`;
+//     if (timeline.sales) section += `Sales: ${formatDate(timeline.sales)}\n`;
+//     if (timeline.payment)
+//       section += `Payment: ${formatDate(timeline.payment)}\n`;
+//     if (timeline.release)
+//       section += `Release: ${formatDate(timeline.release)}\n`;
+//     if (timeline.completed)
+//       section += `Completed: ${formatDate(timeline.completed)}\n`;
+
+//     return section;
+//   }
+
+//   /**
+//    * Generate QR for receipt
+//    */
+//   async generateReceiptQR(transactionId, storeId, type, step) {
+//     return await QRService.generateQR({
+//       type: type,
+//       transactionId: transactionId,
+//       storeId: storeId,
+//       step: step || type,
+//       metadata: {
+//         receiptType: type,
+//         generatedAt: new Date().toISOString(),
+//       },
+//     });
+//   }
+
+//   /**
+//    * Create receipt record
+//    */
+//   async createReceiptRecord(transaction, type, qrCode, receiptData) {
+//     const count = await Receipt.countDocuments({
+//       storeId: transaction.storeId,
+//     });
+//     const receiptNumber = `RCP-${new Date().getFullYear()}-${String(count + 1).padStart(6, "0")}`;
+
+//     const receipt = new Receipt({
+//       transactionId: transaction._id,
+//       storeId: transaction.storeId,
+//       type: type,
+//       receiptNumber: receiptNumber,
+//       qrCode: qrCode,
+//       qrPayload: {
+//         version: "1.0",
+//         type: type,
+//         // transactionId: transaction._id,
+//         // storeId: transaction.storeId,
+//         transactionId: transaction._id.toString(),
+//         storeId: transaction.storeId._id.toString(),
+//         timestamp: Date.now(),
+//         expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+//         step: type,
+//       },
+//       receiptData: receiptData,
+//       printed: false,
+//       printCount: 0,
+//     });
+
+//     await receipt.save();
+//     return receipt;
+//   }
+
+//   /**
+//    * Generate PDF for receipt
+//    */
+//   async generateReceiptPDF(transaction, store, type) {
+//     const receiptData = await this.generateReceiptData(transaction, type);
+//     const formattedReceipt = this.formatReceiptForPrinting(receiptData);
+
+//     // Generate PDF using the formatted text or HTML
+//     const buffer = await PDFGenerator.generateReceipt(
+//       {
+//         ...receiptData,
+//         formattedText: formattedReceipt,
+//       },
+//       { size: type === "INVOICE" ? "A4" : "A6" },
+//     );
+
+//     return buffer;
+//   }
+
+//   /**
+//    * Save receipt to disk
+//    */
+//   async saveReceipt(buffer, filename) {
+//     const receiptsDir = path.join(__dirname, "../../receipts");
+//     if (!fs.existsSync(receiptsDir)) {
+//       fs.mkdirSync(receiptsDir, { recursive: true });
+//     }
+//     const filepath = path.join(receiptsDir, filename);
+//     fs.writeFileSync(filepath, buffer);
+//     return filepath;
+//   }
+
+//   /**
+//    * Get receipts by transaction with filtering
+//    */
+//   async getReceiptsByTransaction(transactionId, type = null) {
+//     const query = { transactionId };
+//     if (type) {
+//       query.type = type;
+//     }
+//     return await Receipt.find(query)
+//       .populate("printedBy", "firstName lastName")
+//       .sort({ createdAt: -1 });
+//   }
+
+//   /**
+//    * Get receipt by ID with access control
+//    */
+//   // async getReceiptById(id, user) {
+//   //   const receipt = await Receipt.findById(id)
+//   //     .populate("transactionId")
+//   //     .populate("printedBy", "firstName lastName");
+
+//   //   if (!receipt) {
+//   //     throw new AppError("Receipt not found", 404);
+//   //   }
+
+//   //   if (
+//   //     user.role !== "SUPER_ADMIN" &&
+//   //     user.role !== "ADMIN" &&
+//   //     receipt.storeId.toString() !== user.storeId?.toString()
+//   //   ) {
+//   //     throw new AppError("Access denied", 403);
+//   //   }
+
+//   //   return receipt;
+//   // }
+// async getReceiptById(id, user) {
+//   const receipt = await Receipt.findById(id)
+//     .populate("transactionId")
+//     .populate("storeId", "name code")
+//     .populate("printedBy", "firstName lastName");
+
+//   if (!receipt) {
+//     throw new AppError("Receipt not found", 404);
+//   }
+
+//   // Super Admin has unrestricted access
+//   if (user.role !== "SUPER_ADMIN") {
+//     const receiptStoreId = (
+//       receipt.storeId?._id || receipt.storeId
+//     ).toString();
+
+//     const userStoreId = (
+//       user.storeId?._id || user.storeId
+//     ).toString();
+
+//     if (receiptStoreId !== userStoreId) {
+//       throw new AppError("Access denied", 403);
+//     }
+//   }
+
+//   return receipt;
+// }
+//   /**
+//    * Mark receipt as printed
+//    */
+//   async markAsPrinted(receiptId, userId) {
+//     const receipt = await Receipt.findById(receiptId);
+//     if (!receipt) {
+//       throw new AppError("Receipt not found", 404);
+//     }
+
+//     receipt.printed = true;
+//     receipt.printedAt = new Date();
+//     receipt.printedBy = userId;
+//     receipt.printCount = (receipt.printCount || 0) + 1;
+//     await receipt.save();
+
+//     return receipt;
+//   }
+
+//   /**
+//    * Get receipts with pagination and filters
+//    */
+//   async getReceipts(filters = {}) {
+//     const {
+//       page = 1,
+//       limit = 20,
+//       storeId,
+//       type,
+//       startDate,
+//       endDate,
+//       search,
+//     } = filters;
+
+//     const query = {};
+
+//     if (storeId) {
+//       query.storeId = storeId;
+//     }
+
+//     if (type) {
+//       query.type = type;
+//     }
+
+//     if (startDate || endDate) {
+//       query.createdAt = {};
+//       if (startDate) query.createdAt.$gte = new Date(startDate);
+//       if (endDate) query.createdAt.$lte = new Date(endDate);
+//     }
+
+//     if (search) {
+//       query.$or = [
+//         { receiptNumber: { $regex: search, $options: "i" } },
+//         { type: { $regex: search, $options: "i" } },
+//       ];
+//     }
+
+//     const skip = (page - 1) * limit;
+
+//     const [receipts, total] = await Promise.all([
+//       Receipt.find(query)
+//         .populate("transactionId", "transactionNumber totalAmount status")
+//         .populate("storeId", "name")
+//         .populate("printedBy", "firstName lastName")
+//         .sort({ createdAt: -1 })
+//         .skip(skip)
+//         .limit(limit),
+//       Receipt.countDocuments(query),
+//     ]);
+
+//     return {
+//       receipts,
+//       pagination: {
+//         page,
+//         limit,
+//         total,
+//         pages: Math.ceil(total / limit),
+//       },
+//     };
+//   }
+
+//   // Utility methods
+//   _centerText(text, width) {
+//     const trimmed = text.trim();
+//     if (trimmed.length >= width) return trimmed;
+//     const padding = Math.floor((width - trimmed.length) / 2);
+//     return " ".repeat(padding) + trimmed;
+//   }
+
+//   _padRight(text, width) {
+//     const str = String(text);
+//     return str + " ".repeat(Math.max(0, width - str.length));
+//   }
+
+//   _padLeft(text, width) {
+//     const str = String(text);
+//     return " ".repeat(Math.max(0, width - str.length)) + str;
+//   }
+// }
+
+// module.exports = new ReceiptService();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// // services/receiptService.js
+// const PDFGenerator = require("../utils/pdfGenerator");
+// const Receipt = require("../models/Receipt");
+// const BaseService = require("./baseService");
+// const QRService = require("./qrService");
+// const { AppError } = require("../middleware/errorHandler");
+// const path = require("path");
+// const fs = require("fs");
+
+// class ReceiptService extends BaseService {
+//   /**
+//    * Generate receipt data for a transaction
+//    */
+//   async generateReceiptData(transaction, type = "SALES") {
+//     const populatedTransaction = await this._populateTransaction(transaction);
+
+//     // Build items array from Transaction.items (which are ObjectIds referencing TransactionItem)
+//     const items = [];
+//     if (populatedTransaction.items && populatedTransaction.items.length > 0) {
+//       for (const itemRef of populatedTransaction.items) {
+//         // If items are populated, they should be TransactionItem documents
+//         if (itemRef._id) {
+//           // Check if it's a populated TransactionItem
+//           const product = itemRef.productId || {};
+//           items.push({
+//             id: itemRef._id,
+//             productId: product._id || itemRef.productId,
+//             sku: itemRef.sku || product.sku || "",
+//             name: itemRef.name || product.name || "Item",
+//             quantity: itemRef.quantity || 0,
+//             unitPrice: itemRef.unitPrice || 0,
+//             totalPrice: itemRef.totalPrice || 0,
+//             taxRate: itemRef.taxRate || product.taxRate || 0,
+//             taxAmount: itemRef.taxAmount || 0,
+//             discountAmount: itemRef.discountAmount || 0,
+//             discountPercentage: itemRef.discountPercentage || 0,
+//             warehouseLocation: itemRef.warehouseLocation || {},
+//             isReleased: itemRef.isReleased || false,
+//             releasedQuantity: itemRef.releasedQuantity || 0,
+//             product: product._id
+//               ? {
+//                   name: product.name,
+//                   sku: product.sku,
+//                   description: product.description,
+//                   category: product.category,
+//                   brand: product.brand,
+//                 }
+//               : null,
+//           });
+//         }
+//       }
+//     }
+
+//     // Build released items from Transaction.itemsReleased
+//     const releasedItems = (populatedTransaction.itemsReleased || []).map(
+//       (item) => {
+//         const releasedBy = item.releasedBy || {};
+//         return {
+//           productId: item.productId?._id || item.productId,
+//           productName: item.productName || "",
+//           sku: item.sku || "",
+//           quantityReleased: item.quantityReleased || 0,
+//           unitPrice: item.unitPrice || 0,
+//           totalPrice: item.totalPrice || 0,
+//           releasedBy: item.releasedBy?._id || item.releasedBy,
+//           releasedAt: item.releasedAt,
+//           releasedByName: releasedBy._id
+//             ? `${releasedBy.firstName || ""} ${releasedBy.lastName || ""}`.trim()
+//             : "N/A",
+//         };
+//       },
+//     );
+
+//     // Get store data (safe access)
+//     const store = populatedTransaction.storeId || {};
+//     const storeAddress = store.address || {};
+
+//     const receiptData = {
+//       receiptType: type,
+//       generatedAt: new Date().toISOString(),
+//       version: "1.0",
+
+//       // Store Information - MATCHES Store schema
+//       store: {
+//         id: store._id,
+//         name: store.name || "Store",
+//         address: storeAddress.street || "",
+//         city: storeAddress.city || "",
+//         state: storeAddress.state || "",
+//         country: storeAddress.country || "",
+//         zipCode: storeAddress.zipCode || "",
+//         phone: store.phone || "",
+//         email: store.email || "",
+//         taxRate: store.taxRate || 0,
+//         currency: store.currency || "USD",
+//         receiptFooter: store.receiptFooter || "Thank you for your business!",
+//       },
+
+//       // Transaction Information - MATCHES Transaction schema
+//       transaction: {
+//         id: populatedTransaction._id,
+//         number: populatedTransaction.transactionNumber,
+//         invoiceNumber: populatedTransaction.finalInvoiceNumber || "",
+//         status: populatedTransaction.status,
+//         createdAt: populatedTransaction.createdAt,
+//         updatedAt: populatedTransaction.updatedAt,
+//         salesTimestamp: populatedTransaction.salesTimestamp,
+//         paymentTimestamp: populatedTransaction.paymentTimestamp,
+//         releaseTimestamp: populatedTransaction.releaseTimestamp,
+//       },
+
+//       // Items - MATCHES TransactionItem schema
+//       items: items,
+
+//       // Released Items - MATCHES Transaction.itemsReleased schema
+//       releasedItems: releasedItems,
+
+//       // Financial Summary - MATCHES Transaction schema
+//       summary: {
+//         subtotal: populatedTransaction.subtotal || 0,
+//         taxTotal: populatedTransaction.taxTotal || 0,
+//         discountTotal: populatedTransaction.discountTotal || 0,
+//         totalAmount: populatedTransaction.totalAmount || 0,
+//         amountPaid: populatedTransaction.amountPaid || 0,
+//         changeAmount: populatedTransaction.changeAmount || 0,
+//         paymentMethod: populatedTransaction.paymentMethod || "N/A",
+//       },
+
+//       // Staff Information - MATCHES populated User schema
+//       staff: {
+//         salesAttendant: populatedTransaction.salesAttendantId
+//           ? {
+//               id: populatedTransaction.salesAttendantId._id,
+//               name: `${populatedTransaction.salesAttendantId.firstName || ""} ${populatedTransaction.salesAttendantId.lastName || ""}`.trim(),
+//               email: populatedTransaction.salesAttendantId.email || "",
+//               phone: populatedTransaction.salesAttendantId.phone || "",
+//               role: populatedTransaction.salesAttendantId.role || "",
+//             }
+//           : null,
+//         financeAttendant: populatedTransaction.financeAttendantId
+//           ? {
+//               id: populatedTransaction.financeAttendantId._id,
+//               name: `${populatedTransaction.financeAttendantId.firstName || ""} ${populatedTransaction.financeAttendantId.lastName || ""}`.trim(),
+//               email: populatedTransaction.financeAttendantId.email || "",
+//               phone: populatedTransaction.financeAttendantId.phone || "",
+//               role: populatedTransaction.financeAttendantId.role || "",
+//             }
+//           : null,
+//         warehouseStaff: populatedTransaction.warehouseStaffId
+//           ? {
+//               id: populatedTransaction.warehouseStaffId._id,
+//               name: `${populatedTransaction.warehouseStaffId.firstName || ""} ${populatedTransaction.warehouseStaffId.lastName || ""}`.trim(),
+//               email: populatedTransaction.warehouseStaffId.email || "",
+//               phone: populatedTransaction.warehouseStaffId.phone || "",
+//               role: populatedTransaction.warehouseStaffId.role || "",
+//             }
+//           : null,
+//       },
+
+//       // Timeline - MATCHES Transaction timestamps
+//       timeline: {
+//         created: populatedTransaction.createdAt,
+//         sales: populatedTransaction.salesTimestamp,
+//         payment: populatedTransaction.paymentTimestamp,
+//         release: populatedTransaction.releaseTimestamp,
+//         updated: populatedTransaction.updatedAt,
+//       },
+
+//       // QR Codes - MATCHES Transaction QR fields.
+//       // "QR" = rendered PNG data-URL, for on-screen <Image> display.
+//       // "QRData" = raw signed payload string - REQUIRED for anything
+//       // that needs to re-render/print/scan-validate the code, since
+//       // that's the exact text QRService.validateQR() expects back.
+//       qrCodes: {
+//         salesQR: populatedTransaction.salesQR || null,
+//         salesQRData: populatedTransaction.salesQRData || null,
+//         paymentQR: populatedTransaction.paymentQR || null,
+//         paymentQRData: populatedTransaction.paymentQRData || null,
+//         releaseQR: populatedTransaction.releaseQR || null,
+//         releaseQRData: populatedTransaction.releaseQRData || null,
+//         invoiceQR: populatedTransaction.invoiceQR || null,
+//         invoiceQRData: populatedTransaction.invoiceQRData || null,
+//         salesQRGeneratedAt: populatedTransaction.salesQRGeneratedAt || null,
+//         paymentQRGeneratedAt: populatedTransaction.paymentQRGeneratedAt || null,
+//         releaseQRGeneratedAt: populatedTransaction.releaseQRGeneratedAt || null,
+//         invoiceQRGeneratedAt: populatedTransaction.invoiceQRGeneratedAt || null,
+//       },
+
+//       // Workflow Status - MATCHES Transaction statuses
+//       workflow: {
+//         salesStatus: populatedTransaction.salesStatus || "PENDING",
+//         paymentStatus: populatedTransaction.paymentStatus || "PENDING",
+//         warehouseStatus: populatedTransaction.warehouseStatus || "PENDING",
+//         status: populatedTransaction.status || "PENDING",
+//       },
+
+//       // Additional Data - safe access for fields that may not exist
+//       additionalData: {
+//         salesReceiptPrinted: populatedTransaction.salesReceiptPrinted || false,
+//         paymentReceiptPrinted:
+//           populatedTransaction.paymentReceiptPrinted || false,
+//         finalInvoicePrinted: populatedTransaction.finalInvoicePrinted || false,
+//       },
+//     };
+
+//     // ------------------------------------------------------------
+//     // QR for THIS receipt: reuse the transaction's own canonical,
+//     // already-signed QR for this step - never fabricate a new one
+//     // here. Every receipt of a given type must carry the exact same
+//     // QR as everywhere else that type is shown (in-app, print,
+//     // Receipt record), or a code that's valid in one place and
+//     // "invalid/expired" in another when scanned.
+//     // ------------------------------------------------------------
+//     const qrFieldByType = {
+//       SALES: { image: "salesQR", data: "salesQRData" },
+//       PAYMENT: { image: "paymentQR", data: "paymentQRData" },
+//       RELEASE: { image: "releaseQR", data: "releaseQRData" },
+//       INVOICE: { image: "invoiceQR", data: "invoiceQRData" },
+//       // The final/completed receipt is issued alongside the invoice QR.
+//       FINAL: { image: "invoiceQR", data: "invoiceQRData" },
+//     };
+
+//     const qrFields = qrFieldByType[type] || qrFieldByType.SALES;
+//     const qrCodeImage = populatedTransaction[qrFields.image] || null;
+//     const qrCode = populatedTransaction[qrFields.data] || null;
+
+//     if (!qrCode) {
+//       console.warn(
+//         `[ReceiptService] No signed QR data found on transaction ${populatedTransaction._id} for type ${type}. ` +
+//           "The QR-generation step for this stage may not have run yet.",
+//       );
+//     }
+
+//     // Flat fields, matching what printing/scanning code actually consumes.
+//     receiptData.qrCode = qrCode; // raw signed string - use this to print/scan
+//     receiptData.qrCodeImage = qrCodeImage; // rendered PNG - use this to display
+
+//     // Cache receipt data on transaction
+//     if (populatedTransaction._id) {
+//       populatedTransaction.receiptData = receiptData;
+//       await populatedTransaction.save();
+//     }
+
+//     const receipt = await this.createReceiptRecord(
+//       populatedTransaction,
+//       type,
+//       qrCode,
+//       qrCodeImage,
+//       receiptData,
+//     );
+
+//     return {
+//       receipt,
+//       receiptData,
+//     };
+//   }
+
+//   async _populateTransaction(transaction) {
+//     if (transaction.populated) {
+//       return transaction;
+//     }
+
+//     // Populate store
+//     await transaction.populate({
+//       path: "storeId",
+//       select: "name address phone email taxRate currency receiptFooter",
+//     });
+
+//     // Populate staff
+//     await transaction.populate({
+//       path: "salesAttendantId",
+//       select: "firstName lastName email phone role",
+//     });
+
+//     await transaction.populate({
+//       path: "financeAttendantId",
+//       select: "firstName lastName email phone role",
+//     });
+
+//     await transaction.populate({
+//       path: "warehouseStaffId",
+//       select: "firstName lastName email phone role",
+//     });
+
+//     // IMPORTANT: Populate items with product details
+//     await transaction.populate({
+//       path: "items",
+//       populate: {
+//         path: "productId",
+//         select: "name sku unitPrice taxRate description category brand",
+//       },
+//     });
+
+//     // Populate released items
+//     await transaction.populate({
+//       path: "itemsReleased.releasedBy",
+//       select: "firstName lastName",
+//     });
+
+//     await transaction.populate({
+//       path: "itemsReleased.productId",
+//       select: "name sku unitPrice",
+//     });
+
+//     transaction.populated = true;
+//     return transaction;
+//   }
+
+//   /**
+//    * Format receipt for printing with enhanced data
+//    */
+//   formatReceiptForPrinting(receiptData) {
+//     const line = "═".repeat(56);
+//     const thinLine = "─".repeat(56);
+//     const width = 56;
+
+//     let receipt = "";
+
+//     // Header
+//     receipt += `${line}\n`;
+//     receipt +=
+//       this._centerText(receiptData.store.name || "STORE", width) + "\n";
+//     receipt += this._centerText(receiptData.store.address || "", width) + "\n";
+//     receipt +=
+//       this._centerText(`Tel: ${receiptData.store.phone || ""}`, width) + "\n";
+//     receipt +=
+//       this._centerText(`Email: ${receiptData.store.email || ""}`, width) + "\n";
+//     if (receiptData.store.taxId) {
+//       receipt +=
+//         this._centerText(`Tax ID: ${receiptData.store.taxId}`, width) + "\n";
+//     }
+//     receipt += `${thinLine}\n`;
+
+//     // Receipt Type
+//     receipt +=
+//       this._centerText(`=== ${receiptData.receiptType} RECEIPT ===`, width) +
+//       "\n";
+//     receipt += `${thinLine}\n`;
+
+//     // Transaction Info
+//     receipt += `Transaction: ${receiptData.transaction.number}\n`;
+//     if (receiptData.transaction.invoiceNumber) {
+//       receipt += `Invoice: ${receiptData.transaction.invoiceNumber}\n`;
+//     }
+//     receipt += `Date: ${new Date(receiptData.transaction.createdAt).toLocaleString()}\n`;
+//     receipt += `Status: ${receiptData.transaction.status}\n`;
+//     receipt += `${thinLine}\n`;
+
+//     // Items
+//     receipt += this._formatItemsSection(receiptData.items);
+
+//     // Released Items (if any)
+//     if (receiptData.releasedItems && receiptData.releasedItems.length > 0) {
+//       receipt += `${thinLine}\n`;
+//       receipt += this._formatReleasedItemsSection(receiptData.releasedItems);
+//     }
+
+//     // Summary
+//     receipt += `${thinLine}\n`;
+//     receipt += this._formatSummarySection(receiptData.summary);
+
+//     // Staff
+//     receipt += `${thinLine}\n`;
+//     receipt += this._formatStaffSection(receiptData.staff);
+
+//     // Timeline
+//     receipt += `${thinLine}\n`;
+//     receipt += this._formatTimelineSection(receiptData.timeline);
+
+//     // Additional Data
+//     if (receiptData.additionalData.notes) {
+//       receipt += `${thinLine}\n`;
+//       receipt += `Notes: ${receiptData.additionalData.notes}\n`;
+//     }
+
+//     // Footer
+//     receipt += `${thinLine}\n`;
+//     receipt +=
+//       this._centerText(
+//         receiptData.store.receiptFooter || "Thank you for your business!",
+//         width,
+//       ) + "\n";
+//     receipt +=
+//       this._centerText("Please keep this receipt for your records", width) +
+//       "\n";
+//     receipt += `${line}\n`;
+
+//     return receipt;
+//   }
+
+//   /**
+//    * Format items section with enhanced details
+//    */
+//   _formatItemsSection(items) {
+//     if (!items || items.length === 0) {
+//       return "No items in this receipt\n";
+//     }
+
+//     let section = "ITEMS\n";
+//     section += "─".repeat(56) + "\n";
+//     section += `${this._padRight("Item", 22)}${this._padRight("Qty", 6)}${this._padRight("Price", 12)}${this._padRight("Tax", 8)}${"Total"}\n`;
+//     section += "─".repeat(56) + "\n";
+
+//     let totalItems = 0;
+//     let totalQuantity = 0;
+
+//     for (const item of items) {
+//       const name =
+//         item.name.length > 22 ? item.name.substring(0, 20) + ".." : item.name;
+//       section += `${this._padRight(name, 22)}${this._padRight(item.quantity.toString(), 6)}${this._padRight("$" + item.unitPrice.toFixed(2), 12)}${this._padRight("$" + item.taxAmount.toFixed(2), 8)}$${item.totalPrice.toFixed(2)}\n`;
+
+//       // Show SKU and discount if applicable
+//       if (item.sku) {
+//         section += `  SKU: ${item.sku}`;
+//         if (item.discountAmount > 0) {
+//           section += ` | Discount: $${item.discountAmount.toFixed(2)}`;
+//         }
+//         if (
+//           item.warehouseLocation &&
+//           (item.warehouseLocation.aisle || item.warehouseLocation.shelf)
+//         ) {
+//           section += ` | Location: ${item.warehouseLocation.aisle || ""}${item.warehouseLocation.shelf ? "-" + item.warehouseLocation.shelf : ""}`;
+//         }
+//         section += "\n";
+//       }
+
+//       totalItems++;
+//       totalQuantity += item.quantity;
+//     }
+
+//     section += "─".repeat(56) + "\n";
+//     section += `${this._padRight(`Total: ${totalItems} items`, 40)}Qty: ${totalQuantity}\n`;
+
+//     return section;
+//   }
+
+//   /**
+//    * Format released items section
+//    */
+//   _formatReleasedItemsSection(releasedItems) {
+//     if (!releasedItems || releasedItems.length === 0) {
+//       return "";
+//     }
+
+//     let section = "RELEASED ITEMS\n";
+//     section += "─".repeat(56) + "\n";
+//     section += `${this._padRight("Item", 22)}${this._padRight("Qty", 6)}${this._padRight("Price", 12)}${"Total"}\n`;
+//     section += "─".repeat(56) + "\n";
+
+//     for (const item of releasedItems) {
+//       const name = item.productName || "Item";
+//       const displayName =
+//         name.length > 22 ? name.substring(0, 20) + ".." : name;
+//       section += `${this._padRight(displayName, 22)}${this._padRight(item.quantityReleased.toString(), 6)}${this._padRight("$" + item.unitPrice.toFixed(2), 12)}$${item.totalPrice.toFixed(2)}\n`;
+//       if (item.releasedByName) {
+//         section += `  Released By: ${item.releasedByName}\n`;
+//       }
+//     }
+
+//     return section;
+//   }
+
+//   /**
+//    * Format summary section with more details
+//    */
+//   _formatSummarySection(summary) {
+//     let section = "SUMMARY\n";
+//     section += "─".repeat(56) + "\n";
+//     section += `Subtotal: ${this._padLeft("$" + summary.subtotal.toFixed(2), 47)}\n`;
+//     section += `Tax: ${this._padLeft("$" + summary.taxTotal.toFixed(2), 52)}\n`;
+//     if (summary.discountTotal > 0) {
+//       section += `Discount: ${this._padLeft("- $" + summary.discountTotal.toFixed(2), 48)}\n`;
+//     }
+//     section += "─".repeat(56) + "\n";
+//     section += `TOTAL: ${this._padLeft("$" + summary.totalAmount.toFixed(2), 50)}\n`;
+//     section += "─".repeat(56) + "\n";
+//     section += `Amount Paid: ${this._padLeft("$" + summary.amountPaid.toFixed(2), 44)}\n`;
+//     section += `Change: ${this._padLeft("$" + summary.changeAmount.toFixed(2), 50)}\n`;
+//     section += `Payment Method: ${summary.paymentMethod}\n`;
+//     if (summary.paymentReference) {
+//       section += `Reference: ${summary.paymentReference}\n`;
+//     }
+//     return section;
+//   }
+
+//   /**
+//    * Format staff section
+//    */
+//   _formatStaffSection(staff) {
+//     let section = "STAFF\n";
+//     section += "─".repeat(56) + "\n";
+
+//     if (staff.salesAttendant) {
+//       section += `Sales: ${staff.salesAttendant.name}`;
+//       if (staff.salesAttendant.email) {
+//         section += ` (${staff.salesAttendant.email})`;
+//       }
+//       section += "\n";
+//     }
+//     if (staff.financeAttendant) {
+//       section += `Finance: ${staff.financeAttendant.name}`;
+//       if (staff.financeAttendant.email) {
+//         section += ` (${staff.financeAttendant.email})`;
+//       }
+//       section += "\n";
+//     }
+//     if (staff.warehouseStaff) {
+//       section += `Warehouse: ${staff.warehouseStaff.name}`;
+//       if (staff.warehouseStaff.email) {
+//         section += ` (${staff.warehouseStaff.email})`;
+//       }
+//       section += "\n";
+//     }
+
+//     return section;
+//   }
+
+//   /**
+//    * Format timeline section
+//    */
+//   _formatTimelineSection(timeline) {
+//     let section = "TIMELINE\n";
+//     section += "─".repeat(56) + "\n";
+
+//     const formatDate = (date) => {
+//       if (!date) return "N/A";
+//       return new Date(date).toLocaleString();
+//     };
+
+//     section += `Created: ${formatDate(timeline.created)}\n`;
+//     if (timeline.sales) section += `Sales: ${formatDate(timeline.sales)}\n`;
+//     if (timeline.payment)
+//       section += `Payment: ${formatDate(timeline.payment)}\n`;
+//     if (timeline.release)
+//       section += `Release: ${formatDate(timeline.release)}\n`;
+//     if (timeline.completed)
+//       section += `Completed: ${formatDate(timeline.completed)}\n`;
+
+//     return section;
+//   }
+
+//   /**
+//    * @deprecated No longer used by generateReceiptData()/generateReceipt().
+//    * A receipt's QR must always be the transaction's own canonical,
+//    * already-signed QR for that type/step (see generateReceiptData) -
+//    * generating a fresh, separate one here would produce a QR that
+//    * doesn't match what's shown/printed elsewhere for the same
+//    * transaction. Kept only in case older code still calls this
+//    * directly; do not wire this into any new receipt-creation path.
+//    */
+//   async generateReceiptQR(transactionId, storeId, type, step) {
+//     return await QRService.generateQR({
+//       type: type,
+//       transactionId: transactionId,
+//       storeId: storeId,
+//       step: step || type,
+//       metadata: {
+//         receiptType: type,
+//         generatedAt: new Date().toISOString(),
+//       },
+//     });
+//   }
+
+//   /**
+//    * Create receipt record.
+//    *
+//    * qrCode:      raw signed payload string (QRService.validateQR-compatible) -
+//    *              the transaction's own canonical QR for this type/step.
+//    * qrCodeImage: rendered PNG data-URL of that same QR, for on-screen display.
+//    *
+//    * Both must come from the transaction's stored QR fields (see
+//    * generateReceiptData) - never generated fresh here, or this record's
+//    * QR would silently diverge from the one already shown/printed
+//    * elsewhere for the same transaction+type.
+//    */
+//   async createReceiptRecord(transaction, type, qrCode, qrCodeImage, receiptData) {
+//     const count = await Receipt.countDocuments({
+//       storeId: transaction.storeId,
+//     });
+//     const receiptNumber = `RCP-${new Date().getFullYear()}-${String(count + 1).padStart(6, "0")}`;
+
+//     const receipt = new Receipt({
+//       transactionId: transaction._id,
+//       storeId: transaction.storeId,
+//       type: type,
+//       receiptNumber: receiptNumber,
+//       // Store the raw signed string as the canonical qrCode - this is
+//       // what a scanner/QRService.validateQR() actually needs.
+//       qrCode: qrCode || "",
+//       qrCodeImage: qrCodeImage || null,
+//       // Human-readable snapshot of what's encoded, decoded from the
+//       // real signed string rather than reconstructed by hand (which
+//       // previously produced a payload that didn't match qrCode at all).
+//       qrPayload: qrCode ? QRService.decodePayload(qrCode) || {} : {},
+//       receiptData: receiptData,
+//       printed: false,
+//       printCount: 0,
+//     });
+
+//     await receipt.save();
+//     return receipt;
+//   }
+
+//   /**
+//    * Generate PDF for receipt
+//    */
+//   async generateReceiptPDF(transaction, store, type) {
+//     const receiptData = await this.generateReceiptData(transaction, type);
+//     const formattedReceipt = this.formatReceiptForPrinting(receiptData);
+
+//     // Generate PDF using the formatted text or HTML
+//     const buffer = await PDFGenerator.generateReceipt(
+//       {
+//         ...receiptData,
+//         formattedText: formattedReceipt,
+//       },
+//       { size: type === "INVOICE" ? "A4" : "A6" },
+//     );
+
+//     return buffer;
+//   }
+
+//   /**
+//    * Save receipt to disk
+//    */
+//   async saveReceipt(buffer, filename) {
+//     const receiptsDir = path.join(__dirname, "../../receipts");
+//     if (!fs.existsSync(receiptsDir)) {
+//       fs.mkdirSync(receiptsDir, { recursive: true });
+//     }
+//     const filepath = path.join(receiptsDir, filename);
+//     fs.writeFileSync(filepath, buffer);
+//     return filepath;
+//   }
+
+//   /**
+//    * Get receipts by transaction with filtering
+//    */
+//   async getReceiptsByTransaction(transactionId, type = null) {
+//     const query = { transactionId };
+//     if (type) {
+//       query.type = type;
+//     }
+//     return await Receipt.find(query)
+//       .populate("printedBy", "firstName lastName")
+//       .sort({ createdAt: -1 });
+//   }
+
+//   /**
+//    * Get receipt by ID with access control
+//    */
+//   // async getReceiptById(id, user) {
+//   //   const receipt = await Receipt.findById(id)
+//   //     .populate("transactionId")
+//   //     .populate("printedBy", "firstName lastName");
+
+//   //   if (!receipt) {
+//   //     throw new AppError("Receipt not found", 404);
+//   //   }
+
+//   //   if (
+//   //     user.role !== "SUPER_ADMIN" &&
+//   //     user.role !== "ADMIN" &&
+//   //     receipt.storeId.toString() !== user.storeId?.toString()
+//   //   ) {
+//   //     throw new AppError("Access denied", 403);
+//   //   }
+
+//   //   return receipt;
+//   // }
+// async getReceiptById(id, user) {
+//   const receipt = await Receipt.findById(id)
+//     .populate("transactionId")
+//     .populate("storeId", "name code")
+//     .populate("printedBy", "firstName lastName");
+
+//   if (!receipt) {
+//     throw new AppError("Receipt not found", 404);
+//   }
+
+//   // Super Admin has unrestricted access
+//   if (user.role !== "SUPER_ADMIN") {
+//     const receiptStoreId = (
+//       receipt.storeId?._id || receipt.storeId
+//     ).toString();
+
+//     const userStoreId = (
+//       user.storeId?._id || user.storeId
+//     ).toString();
+
+//     if (receiptStoreId !== userStoreId) {
+//       throw new AppError("Access denied", 403);
+//     }
+//   }
+
+//   return receipt;
+// }
+//   /**
+//    * Mark receipt as printed
+//    */
+//   async markAsPrinted(receiptId, userId) {
+//     const receipt = await Receipt.findById(receiptId);
+//     if (!receipt) {
+//       throw new AppError("Receipt not found", 404);
+//     }
+
+//     receipt.printed = true;
+//     receipt.printedAt = new Date();
+//     receipt.printedBy = userId;
+//     receipt.printCount = (receipt.printCount || 0) + 1;
+//     await receipt.save();
+
+//     return receipt;
+//   }
+
+//   /**
+//    * Get receipts with pagination and filters
+//    */
+//   async getReceipts(filters = {}) {
+//     const {
+//       page = 1,
+//       limit = 20,
+//       storeId,
+//       type,
+//       startDate,
+//       endDate,
+//       search,
+//     } = filters;
+
+//     const query = {};
+
+//     if (storeId) {
+//       query.storeId = storeId;
+//     }
+
+//     if (type) {
+//       query.type = type;
+//     }
+
+//     if (startDate || endDate) {
+//       query.createdAt = {};
+//       if (startDate) query.createdAt.$gte = new Date(startDate);
+//       if (endDate) query.createdAt.$lte = new Date(endDate);
+//     }
+
+//     if (search) {
+//       query.$or = [
+//         { receiptNumber: { $regex: search, $options: "i" } },
+//         { type: { $regex: search, $options: "i" } },
+//       ];
+//     }
+
+//     const skip = (page - 1) * limit;
+
+//     const [receipts, total] = await Promise.all([
+//       Receipt.find(query)
+//         .populate("transactionId", "transactionNumber totalAmount status")
+//         .populate("storeId", "name")
+//         .populate("printedBy", "firstName lastName")
+//         .sort({ createdAt: -1 })
+//         .skip(skip)
+//         .limit(limit),
+//       Receipt.countDocuments(query),
+//     ]);
+
+//     return {
+//       receipts,
+//       pagination: {
+//         page,
+//         limit,
+//         total,
+//         pages: Math.ceil(total / limit),
+//       },
+//     };
+//   }
+
+//   // Utility methods
+//   _centerText(text, width) {
+//     const trimmed = text.trim();
+//     if (trimmed.length >= width) return trimmed;
+//     const padding = Math.floor((width - trimmed.length) / 2);
+//     return " ".repeat(padding) + trimmed;
+//   }
+
+//   _padRight(text, width) {
+//     const str = String(text);
+//     return str + " ".repeat(Math.max(0, width - str.length));
+//   }
+
+//   _padLeft(text, width) {
+//     const str = String(text);
+//     return " ".repeat(Math.max(0, width - str.length)) + str;
+//   }
+// }
+
+// module.exports = new ReceiptService();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // services/receiptService.js
 const PDFGenerator = require("../utils/pdfGenerator");
 const Receipt = require("../models/Receipt");
@@ -14,13 +1651,11 @@ class ReceiptService extends BaseService {
   async generateReceiptData(transaction, type = "SALES") {
     const populatedTransaction = await this._populateTransaction(transaction);
 
-    // Build items array from Transaction.items (which are ObjectIds referencing TransactionItem)
+    // Build items array from Transaction.items
     const items = [];
     if (populatedTransaction.items && populatedTransaction.items.length > 0) {
       for (const itemRef of populatedTransaction.items) {
-        // If items are populated, they should be TransactionItem documents
         if (itemRef._id) {
-          // Check if it's a populated TransactionItem
           const product = itemRef.productId || {};
           items.push({
             id: itemRef._id,
@@ -71,7 +1706,7 @@ class ReceiptService extends BaseService {
       },
     );
 
-    // Get store data (safe access)
+    // Get store data
     const store = populatedTransaction.storeId || {};
     const storeAddress = store.address || {};
 
@@ -80,7 +1715,6 @@ class ReceiptService extends BaseService {
       generatedAt: new Date().toISOString(),
       version: "1.0",
 
-      // Store Information - MATCHES Store schema
       store: {
         id: store._id,
         name: store.name || "Store",
@@ -96,7 +1730,6 @@ class ReceiptService extends BaseService {
         receiptFooter: store.receiptFooter || "Thank you for your business!",
       },
 
-      // Transaction Information - MATCHES Transaction schema
       transaction: {
         id: populatedTransaction._id,
         number: populatedTransaction.transactionNumber,
@@ -109,13 +1742,9 @@ class ReceiptService extends BaseService {
         releaseTimestamp: populatedTransaction.releaseTimestamp,
       },
 
-      // Items - MATCHES TransactionItem schema
       items: items,
-
-      // Released Items - MATCHES Transaction.itemsReleased schema
       releasedItems: releasedItems,
 
-      // Financial Summary - MATCHES Transaction schema
       summary: {
         subtotal: populatedTransaction.subtotal || 0,
         taxTotal: populatedTransaction.taxTotal || 0,
@@ -126,7 +1755,6 @@ class ReceiptService extends BaseService {
         paymentMethod: populatedTransaction.paymentMethod || "N/A",
       },
 
-      // Staff Information - MATCHES populated User schema
       staff: {
         salesAttendant: populatedTransaction.salesAttendantId
           ? {
@@ -157,7 +1785,6 @@ class ReceiptService extends BaseService {
           : null,
       },
 
-      // Timeline - MATCHES Transaction timestamps
       timeline: {
         created: populatedTransaction.createdAt,
         sales: populatedTransaction.salesTimestamp,
@@ -166,19 +1793,24 @@ class ReceiptService extends BaseService {
         updated: populatedTransaction.updatedAt,
       },
 
-      // QR Codes - MATCHES Transaction QR fields
+      // QR Codes - Store BOTH representations
       qrCodes: {
+        // Image (PNG data-URL) for on-screen display
         salesQR: populatedTransaction.salesQR || null,
         paymentQR: populatedTransaction.paymentQR || null,
         releaseQR: populatedTransaction.releaseQR || null,
         invoiceQR: populatedTransaction.invoiceQR || null,
+        // Raw signed string for scanning/printing
+        salesQRData: populatedTransaction.salesQRData || null,
+        paymentQRData: populatedTransaction.paymentQRData || null,
+        releaseQRData: populatedTransaction.releaseQRData || null,
+        invoiceQRData: populatedTransaction.invoiceQRData || null,
         salesQRGeneratedAt: populatedTransaction.salesQRGeneratedAt || null,
         paymentQRGeneratedAt: populatedTransaction.paymentQRGeneratedAt || null,
         releaseQRGeneratedAt: populatedTransaction.releaseQRGeneratedAt || null,
         invoiceQRGeneratedAt: populatedTransaction.invoiceQRGeneratedAt || null,
       },
 
-      // Workflow Status - MATCHES Transaction statuses
       workflow: {
         salesStatus: populatedTransaction.salesStatus || "PENDING",
         paymentStatus: populatedTransaction.paymentStatus || "PENDING",
@@ -186,7 +1818,6 @@ class ReceiptService extends BaseService {
         status: populatedTransaction.status || "PENDING",
       },
 
-      // Additional Data - safe access for fields that may not exist
       additionalData: {
         salesReceiptPrinted: populatedTransaction.salesReceiptPrinted || false,
         paymentReceiptPrinted:
@@ -195,37 +1826,44 @@ class ReceiptService extends BaseService {
       },
     };
 
+    // ------------------------------------------------------------
+    // CRITICAL FIX: Get the transaction's canonical QR for this type
+    // ------------------------------------------------------------
+    const qrFieldByType = {
+      SALES: { image: "salesQR", data: "salesQRData" },
+      PAYMENT: { image: "paymentQR", data: "paymentQRData" },
+      RELEASE: { image: "releaseQR", data: "releaseQRData" },
+      INVOICE: { image: "invoiceQR", data: "invoiceQRData" },
+      FINAL: { image: "invoiceQR", data: "invoiceQRData" },
+    };
+
+    const qrFields = qrFieldByType[type] || qrFieldByType.SALES;
+    const qrCodeImage = populatedTransaction[qrFields.image] || null;
+    const qrCode = populatedTransaction[qrFields.data] || null;
+
+    if (!qrCode) {
+      console.warn(
+        `[ReceiptService] No signed QR data found on transaction ${populatedTransaction._id} for type ${type}. ` +
+          "The QR-generation step for this stage may not have run yet.",
+      );
+    }
+
+    // Store the RAW string as qrCode (for printing/scanning)
+    // Store the IMAGE as qrCodeImage (for on-screen display)
+    receiptData.qrCode = qrCode; // Raw signed string - use this for printing!
+    receiptData.qrCodeImage = qrCodeImage; // Rendered PNG - use this for display only!
+
     // Cache receipt data on transaction
     if (populatedTransaction._id) {
       populatedTransaction.receiptData = receiptData;
       await populatedTransaction.save();
     }
 
-    // // Create receipt record
-    //   const receipt = await this.createReceiptRecord(
-    //     populatedTransaction,
-    //     type,
-    //     qrCode,
-    //     receiptData
-    //   );
-    const QRCode = require("qrcode");
-
-    const qrPayload = {
-      version: "1.0",
-      type,
-      transactionId: populatedTransaction._id.toString(),
-      storeId: populatedTransaction.storeId._id.toString(),
-      timestamp: Date.now(),
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-      step: type,
-    };
-
-    const qrCode = await QRCode.toDataURL(JSON.stringify(qrPayload));
-
     const receipt = await this.createReceiptRecord(
       populatedTransaction,
       type,
       qrCode,
+      qrCodeImage,
       receiptData,
     );
 
@@ -240,13 +1878,11 @@ class ReceiptService extends BaseService {
       return transaction;
     }
 
-    // Populate store
     await transaction.populate({
       path: "storeId",
       select: "name address phone email taxRate currency receiptFooter",
     });
 
-    // Populate staff
     await transaction.populate({
       path: "salesAttendantId",
       select: "firstName lastName email phone role",
@@ -262,7 +1898,6 @@ class ReceiptService extends BaseService {
       select: "firstName lastName email phone role",
     });
 
-    // IMPORTANT: Populate items with product details
     await transaction.populate({
       path: "items",
       populate: {
@@ -271,7 +1906,6 @@ class ReceiptService extends BaseService {
       },
     });
 
-    // Populate released items
     await transaction.populate({
       path: "itemsReleased.releasedBy",
       select: "firstName lastName",
@@ -296,7 +1930,6 @@ class ReceiptService extends BaseService {
 
     let receipt = "";
 
-    // Header
     receipt += `${line}\n`;
     receipt +=
       this._centerText(receiptData.store.name || "STORE", width) + "\n";
@@ -311,13 +1944,11 @@ class ReceiptService extends BaseService {
     }
     receipt += `${thinLine}\n`;
 
-    // Receipt Type
     receipt +=
       this._centerText(`=== ${receiptData.receiptType} RECEIPT ===`, width) +
       "\n";
     receipt += `${thinLine}\n`;
 
-    // Transaction Info
     receipt += `Transaction: ${receiptData.transaction.number}\n`;
     if (receiptData.transaction.invoiceNumber) {
       receipt += `Invoice: ${receiptData.transaction.invoiceNumber}\n`;
@@ -326,34 +1957,27 @@ class ReceiptService extends BaseService {
     receipt += `Status: ${receiptData.transaction.status}\n`;
     receipt += `${thinLine}\n`;
 
-    // Items
     receipt += this._formatItemsSection(receiptData.items);
 
-    // Released Items (if any)
     if (receiptData.releasedItems && receiptData.releasedItems.length > 0) {
       receipt += `${thinLine}\n`;
       receipt += this._formatReleasedItemsSection(receiptData.releasedItems);
     }
 
-    // Summary
     receipt += `${thinLine}\n`;
     receipt += this._formatSummarySection(receiptData.summary);
 
-    // Staff
     receipt += `${thinLine}\n`;
     receipt += this._formatStaffSection(receiptData.staff);
 
-    // Timeline
     receipt += `${thinLine}\n`;
     receipt += this._formatTimelineSection(receiptData.timeline);
 
-    // Additional Data
     if (receiptData.additionalData.notes) {
       receipt += `${thinLine}\n`;
       receipt += `Notes: ${receiptData.additionalData.notes}\n`;
     }
 
-    // Footer
     receipt += `${thinLine}\n`;
     receipt +=
       this._centerText(
@@ -368,9 +1992,6 @@ class ReceiptService extends BaseService {
     return receipt;
   }
 
-  /**
-   * Format items section with enhanced details
-   */
   _formatItemsSection(items) {
     if (!items || items.length === 0) {
       return "No items in this receipt\n";
@@ -389,7 +2010,6 @@ class ReceiptService extends BaseService {
         item.name.length > 22 ? item.name.substring(0, 20) + ".." : item.name;
       section += `${this._padRight(name, 22)}${this._padRight(item.quantity.toString(), 6)}${this._padRight("$" + item.unitPrice.toFixed(2), 12)}${this._padRight("$" + item.taxAmount.toFixed(2), 8)}$${item.totalPrice.toFixed(2)}\n`;
 
-      // Show SKU and discount if applicable
       if (item.sku) {
         section += `  SKU: ${item.sku}`;
         if (item.discountAmount > 0) {
@@ -414,9 +2034,6 @@ class ReceiptService extends BaseService {
     return section;
   }
 
-  /**
-   * Format released items section
-   */
   _formatReleasedItemsSection(releasedItems) {
     if (!releasedItems || releasedItems.length === 0) {
       return "";
@@ -440,9 +2057,6 @@ class ReceiptService extends BaseService {
     return section;
   }
 
-  /**
-   * Format summary section with more details
-   */
   _formatSummarySection(summary) {
     let section = "SUMMARY\n";
     section += "─".repeat(56) + "\n";
@@ -463,9 +2077,6 @@ class ReceiptService extends BaseService {
     return section;
   }
 
-  /**
-   * Format staff section
-   */
   _formatStaffSection(staff) {
     let section = "STAFF\n";
     section += "─".repeat(56) + "\n";
@@ -495,9 +2106,6 @@ class ReceiptService extends BaseService {
     return section;
   }
 
-  /**
-   * Format timeline section
-   */
   _formatTimelineSection(timeline) {
     let section = "TIMELINE\n";
     section += "─".repeat(56) + "\n";
@@ -520,7 +2128,7 @@ class ReceiptService extends BaseService {
   }
 
   /**
-   * Generate QR for receipt
+   * @deprecated No longer used - kept for backward compatibility
    */
   async generateReceiptQR(transactionId, storeId, type, step) {
     return await QRService.generateQR({
@@ -536,9 +2144,12 @@ class ReceiptService extends BaseService {
   }
 
   /**
-   * Create receipt record
+   * Create receipt record.
+   *
+   * qrCode:      raw signed payload string (QRService.validateQR-compatible)
+   * qrCodeImage: rendered PNG data-URL of that same QR, for on-screen display.
    */
-  async createReceiptRecord(transaction, type, qrCode, receiptData) {
+  async createReceiptRecord(transaction, type, qrCode, qrCodeImage, receiptData) {
     const count = await Receipt.countDocuments({
       storeId: transaction.storeId,
     });
@@ -549,18 +2160,12 @@ class ReceiptService extends BaseService {
       storeId: transaction.storeId,
       type: type,
       receiptNumber: receiptNumber,
-      qrCode: qrCode,
-      qrPayload: {
-        version: "1.0",
-        type: type,
-        // transactionId: transaction._id,
-        // storeId: transaction.storeId,
-        transactionId: transaction._id.toString(),
-        storeId: transaction.storeId._id.toString(),
-        timestamp: Date.now(),
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-        step: type,
-      },
+      // CRITICAL: Store the raw signed string as the canonical qrCode
+      qrCode: qrCode || "",
+      // Store the PNG image separately for display
+      qrCodeImage: qrCodeImage || null,
+      // Human-readable snapshot of what's encoded
+      qrPayload: qrCode ? QRService.decodePayload(qrCode) || {} : {},
       receiptData: receiptData,
       printed: false,
       printCount: 0,
@@ -577,7 +2182,6 @@ class ReceiptService extends BaseService {
     const receiptData = await this.generateReceiptData(transaction, type);
     const formattedReceipt = this.formatReceiptForPrinting(receiptData);
 
-    // Generate PDF using the formatted text or HTML
     const buffer = await PDFGenerator.generateReceipt(
       {
         ...receiptData,
@@ -618,52 +2222,33 @@ class ReceiptService extends BaseService {
   /**
    * Get receipt by ID with access control
    */
-  // async getReceiptById(id, user) {
-  //   const receipt = await Receipt.findById(id)
-  //     .populate("transactionId")
-  //     .populate("printedBy", "firstName lastName");
+  async getReceiptById(id, user) {
+    const receipt = await Receipt.findById(id)
+      .populate("transactionId")
+      .populate("storeId", "name code")
+      .populate("printedBy", "firstName lastName");
 
-  //   if (!receipt) {
-  //     throw new AppError("Receipt not found", 404);
-  //   }
-
-  //   if (
-  //     user.role !== "SUPER_ADMIN" &&
-  //     user.role !== "ADMIN" &&
-  //     receipt.storeId.toString() !== user.storeId?.toString()
-  //   ) {
-  //     throw new AppError("Access denied", 403);
-  //   }
-
-  //   return receipt;
-  // }
-async getReceiptById(id, user) {
-  const receipt = await Receipt.findById(id)
-    .populate("transactionId")
-    .populate("storeId", "name code")
-    .populate("printedBy", "firstName lastName");
-
-  if (!receipt) {
-    throw new AppError("Receipt not found", 404);
-  }
-
-  // Super Admin has unrestricted access
-  if (user.role !== "SUPER_ADMIN") {
-    const receiptStoreId = (
-      receipt.storeId?._id || receipt.storeId
-    ).toString();
-
-    const userStoreId = (
-      user.storeId?._id || user.storeId
-    ).toString();
-
-    if (receiptStoreId !== userStoreId) {
-      throw new AppError("Access denied", 403);
+    if (!receipt) {
+      throw new AppError("Receipt not found", 404);
     }
+
+    if (user.role !== "SUPER_ADMIN") {
+      const receiptStoreId = (
+        receipt.storeId?._id || receipt.storeId
+      ).toString();
+
+      const userStoreId = (
+        user.storeId?._id || user.storeId
+      ).toString();
+
+      if (receiptStoreId !== userStoreId) {
+        throw new AppError("Access denied", 403);
+      }
+    }
+
+    return receipt;
   }
 
-  return receipt;
-}
   /**
    * Mark receipt as printed
    */

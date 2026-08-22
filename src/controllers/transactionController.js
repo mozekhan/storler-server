@@ -827,12 +827,6 @@ exports.scanPaymentQR = async (req, res) => {
       message: "Payment QR scanned successfully. Ready for warehouse release.",
     });
   } 
-  // catch (error) {
-  //   res.status(error.statusCode || 500).json({
-  //     success: false,
-  //     message: error.message,
-  //   });
-  // }
   catch (error) {
     console.error(error);
 
