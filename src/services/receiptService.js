@@ -2222,32 +2222,62 @@ class ReceiptService extends BaseService {
   /**
    * Get receipt by ID with access control
    */
-  async getReceiptById(id, user) {
-    const receipt = await Receipt.findById(id)
-      .populate("transactionId")
-      .populate("storeId", "name code")
-      .populate("printedBy", "firstName lastName");
+  // async getReceiptById(id, user) {
+  //   const receipt = await Receipt.findById(id)
+  //     .populate("transactionId")
+  //     .populate("storeId", "name code")
+  //     .populate("printedBy", "firstName lastName");
 
-    if (!receipt) {
-      throw new AppError("Receipt not found", 404);
-    }
+  //   if (!receipt) {
+  //     throw new AppError("Receipt not found", 404);
+  //   }
 
-    if (user.role !== "SUPER_ADMIN") {
-      const receiptStoreId = (
-        receipt.storeId?._id || receipt.storeId
-      ).toString();
+  //   if (user.role !== "SUPER_ADMIN") {
+  //     const receiptStoreId = (
+  //       receipt.storeId?._id || receipt.storeId
+  //     ).toString();
 
-      const userStoreId = (
-        user.storeId?._id || user.storeId
-      ).toString();
+  //     const userStoreId = (
+  //       user.storeId?._id || user.storeId
+  //     ).toString();
 
-      if (receiptStoreId !== userStoreId) {
-        throw new AppError("Access denied", 403);
-      }
-    }
+  //     if (receiptStoreId !== userStoreId) {
+  //       throw new AppError("Access denied", 403);
+  //     }
+  //   }
 
+  //   return receipt;
+  // }
+
+  // services/receiptService.js
+
+/**
+ * Get receipt by ID with access control
+ */
+async getReceiptById(id, user) {
+  const receipt = await Receipt.findById(id)
+    .populate("transactionId")
+    .populate("storeId", "name code")
+    .populate("printedBy", "firstName lastName");
+
+  if (!receipt) {
+    throw new AppError("Receipt not found", 404);
+  }
+
+  // ✅ FIX: Super Admin has unrestricted access
+  if (user.role === "SUPER_ADMIN") {
     return receipt;
   }
+
+  const receiptStoreId = (receipt.storeId?._id || receipt.storeId).toString();
+  const userStoreId = (user.storeId?._id || user.storeId)?.toString();
+
+  if (!userStoreId || receiptStoreId !== userStoreId) {
+    throw new AppError("Access denied", 403);
+  }
+
+  return receipt;
+}
 
   /**
    * Mark receipt as printed

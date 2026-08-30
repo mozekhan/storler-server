@@ -1,4 +1,33 @@
 
+// const ProductService = require('../services/productService');
+
+// /**
+//  * Create product
+//  */
+// exports.createProduct = async (req, res) => {
+//   try {
+//     const result = await ProductService.createProduct(
+//       req.body,
+//       req.user._id,
+//       req.user.storeId,
+//       req.ip,
+//       req.headers['user-agent']
+//     );
+
+//     res.status(201).json({
+//       success: true,
+//       data: result,
+//       message: 'Product created successfully'
+//     });
+//   } catch (error) {
+//     res.status(error.statusCode || 500).json({
+//       success: false,
+//       message: error.message
+//     });
+//   }
+// };
+
+// controllers/productController.js
 const ProductService = require('../services/productService');
 
 /**
@@ -17,10 +46,28 @@ exports.createProduct = async (req, res) => {
     res.status(201).json({
       success: true,
       data: result,
-      message: 'Product created successfully'
+      message: `Product created successfully for store ${result.store.name}`
     });
   } catch (error) {
     res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Get user's accessible stores
+ */
+exports.getUserStores = async (req, res) => {
+  try {
+    const stores = await ProductService.getUserStores(req.user);
+    res.json({
+      success: true,
+      data: stores
+    });
+  } catch (error) {
+    res.status(500).json({
       success: false,
       message: error.message
     });

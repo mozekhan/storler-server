@@ -1,147 +1,604 @@
+// const Product = require("../models/Product");
+// const Inventory = require("../models/Inventory");
+// const Transaction = require("../models/Transaction");
+// const BaseService = require("./baseService");
+// const { AppError } = require("../middleware/errorHandler");
+// const AuditLog = require("../models/AuditLog");
+
+// class ProductService extends BaseService {
+//   /**
+//    * Create a new product
+//    */
+//   async createProduct(productData, userId, storeId, ip, userAgent) {
+//     const {
+//       sku,
+//       name,
+//       description,
+//       category,
+//       subCategory,
+//       brand,
+//       unitPrice,
+//       costPrice,
+//       taxRate,
+//       warehouseLocation,
+//       barcode,
+//       minStockLevel,
+//       maxStockLevel,
+//       unitOfMeasure,
+//       initialQuantity = 0, // ← NEW: Initial quantity parameter
+//     } = productData;
+
+//     // Validate
+//     const sanitizedSku = sku.toUpperCase().trim();
+//     const sanitizedName = this.sanitize(name);
+//     const sanitizedDescription = description ? this.sanitize(description) : "";
+
+//     if (unitPrice <= 0) {
+//       throw new AppError("Unit price must be greater than 0", 400);
+//     }
+
+//     // Validate initial quantity is not negative
+//     if (initialQuantity < 0) {
+//       throw new AppError("Initial quantity cannot be negative", 400);
+//     }
+
+//     // Check if SKU already exists
+//     const existingProduct = await Product.findOne({
+//       sku: sanitizedSku,
+//       storeId,
+//     });
+//     if (existingProduct) {
+//       throw new AppError(
+//         "Product with this SKU already exists in this store",
+//         400,
+//       );
+//     }
+
+//     const product = new Product({
+//       sku: sanitizedSku,
+//       name: sanitizedName,
+//       description: sanitizedDescription,
+//       category,
+//       subCategory: subCategory || "",
+//       brand: brand || "",
+//       unitPrice,
+//       costPrice: costPrice || 0,
+//       taxRate: taxRate || 0,
+//       storeId,
+//       warehouseLocation: warehouseLocation || {},
+//       barcode: barcode || sanitizedSku,
+//       minStockLevel: minStockLevel || 5,
+//       maxStockLevel: maxStockLevel || 100,
+//       unitOfMeasure: unitOfMeasure || "each",
+//       isActive: true,
+//     });
+
+//     await product.save();
+
+//     // Create initial inventory with the provided quantity
+//     const inventory = new Inventory({
+//       productId: product._id,
+//       storeId,
+//       quantity: initialQuantity, // ← NEW: Use initialQuantity instead of 0
+//       reservedQuantity: 0,
+//       reorderPoint: minStockLevel || 5,
+//       warehouseLocation: warehouseLocation || {},
+//       lastCounted: initialQuantity > 0 ? new Date() : null, // ← NEW: Set lastCounted if quantity > 0
+//     });
+//     await inventory.save();
+
+//     // Log audit
+//     await this.auditLog(
+//       userId,
+//       null,
+//       "CREATE",
+//       "Product",
+//       product._id,
+//       storeId,
+//       {
+//         after: {
+//           sku: product.sku,
+//           name: product.name,
+//           category: product.category,
+//           unitPrice: product.unitPrice,
+//           initialQuantity: initialQuantity, // ← NEW: Log initial quantity
+//         },
+//         metadata: {
+//           ipAddress: ip,
+//           userAgent,
+//           initialQuantity, // ← NEW: Include in metadata
+//         },
+//       },
+//       "INFO",
+//     );
+
+//     // If initial quantity was added, log an inventory adjustment
+//     if (initialQuantity > 0) {
+//       await this.auditLog(
+//         userId,
+//         null,
+//         "UPDATE",
+//         "Inventory",
+//         inventory._id,
+//         storeId,
+//         {
+//           before: { quantity: 0 },
+//           after: { quantity: initialQuantity },
+//           metadata: {
+//             ipAddress: ip,
+//             userAgent,
+//             reason: "Initial stock on product creation",
+//             adjustment: initialQuantity,
+//             productName: product.name,
+//             productSku: product.sku,
+//           },
+//         },
+//         "INFO",
+//       );
+//     }
+
+//     return { product, inventory };
+//   }
+
+//   /**
+//    * Get products with filters
+//    */
+//   async getProducts(query, user) {
+//     const {
+//       page = 1,
+//       limit = 20,
+//       category,
+//       search,
+//       isActive,
+//       minPrice,
+//       maxPrice,
+//       inStock,
+//       sortBy = "createdAt",
+//       sortOrder = "desc",
+//     } = query;
+
+//     const filter = {};
+
+//     if (user.role !== "SUPER_ADMIN") {
+//       filter.storeId = user.storeId;
+//     }
+
+//     if (category) filter.category = category;
+//     if (isActive !== undefined) filter.isActive = isActive === "true";
+//     if (minPrice) filter.unitPrice = { $gte: parseFloat(minPrice) };
+//     if (maxPrice) {
+//       filter.unitPrice = filter.unitPrice || {};
+//       filter.unitPrice.$lte = parseFloat(maxPrice);
+//     }
+
+//     if (search) {
+//       filter.$or = [
+//         { name: { $regex: search, $options: "i" } },
+//         { sku: { $regex: search, $options: "i" } },
+//         { description: { $regex: search, $options: "i" } },
+//         { barcode: { $regex: search, $options: "i" } },
+//       ];
+//     }
+
+//     const skip = (parseInt(page) - 1) * parseInt(limit);
+//     const sort = { [sortBy]: sortOrder === "desc" ? -1 : 1 };
+
+//     let products = await Product.find(filter)
+//       .populate("storeId", "name code")
+//       .sort(sort)
+//       .skip(skip)
+//       .limit(parseInt(limit));
+
+//     // Get inventory for each product
+//     const productIds = products.map((p) => p._id);
+//     let inventoryData = [];
+
+//     if (productIds.length > 0) {
+//       const inventoryQuery = {
+//         productId: { $in: productIds },
+//         storeId: user.storeId,
+//       };
+//       inventoryData = await Inventory.find(inventoryQuery);
+//     }
+
+//     // Filter by stock status
+//     if (inStock === "true") {
+//       products = products.filter((product) => {
+//         const inventory = inventoryData.find(
+//           (inv) => inv.productId.toString() === product._id.toString(),
+//         );
+//         return inventory && inventory.quantity > 0;
+//       });
+//     }
+
+//     const productsWithInventory = products.map((product) => {
+//       const inventory = inventoryData.find(
+//         (inv) => inv.productId.toString() === product._id.toString(),
+//       );
+//       return {
+//         ...product.toObject(),
+//         inventory: inventory || { quantity: 0, reservedQuantity: 0 },
+//       };
+//     });
+
+//     const total = await Product.countDocuments(filter);
+
+//     return {
+//       products: productsWithInventory,
+//       pagination: {
+//         page: parseInt(page),
+//         limit: parseInt(limit),
+//         total,
+//         pages: Math.ceil(total / parseInt(limit)),
+//       },
+//     };
+//   }
+
+//   /**
+//    * Get product by ID
+//    */
+//   async getProductById(productId, user) {
+//     const product = await Product.findById(productId).populate(
+//       "storeId",
+//       "name code",
+//     );
+//     if (!product) {
+//       throw new AppError("Product not found", 404);
+//     }
+
+//     const productStoreId = product.storeId._id || product.storeId;
+//     const userStoreId = user.storeId._id || user.storeId;
+
+//     if (user.role !== "SUPER_ADMIN" && !productStoreId.equals(userStoreId)) {
+//       throw new AppError("Access denied", 403);
+//     }
+
+//     const inventory = await Inventory.findOne({
+//       productId: product._id,
+//       storeId: user.storeId,
+//     });
+
+//     // Get stock movement history
+//     const movements = await this._getProductMovements(productId, user.storeId);
+
+//     return {
+//       ...product.toObject(),
+//       inventory: inventory || { quantity: 0, reservedQuantity: 0 },
+//       movements,
+//     };
+//   }
+
+// services/productService.js
 const Product = require("../models/Product");
 const Inventory = require("../models/Inventory");
 const Transaction = require("../models/Transaction");
 const BaseService = require("./baseService");
 const { AppError } = require("../middleware/errorHandler");
 const AuditLog = require("../models/AuditLog");
+const Store = require("../models/Store");
+const User = require("../models/User");
 
 class ProductService extends BaseService {
   /**
-   * Create a new product
+   * Create a new product with store assignment
    */
-  async createProduct(productData, userId, storeId, ip, userAgent) {
-    const {
-      sku,
-      name,
-      description,
-      category,
-      subCategory,
-      brand,
-      unitPrice,
-      costPrice,
-      taxRate,
-      warehouseLocation,
-      barcode,
-      minStockLevel,
-      maxStockLevel,
-      unitOfMeasure,
-      initialQuantity = 0, // ← NEW: Initial quantity parameter
-    } = productData;
+  // async createProduct(productData, userId, userStoreId, ip, userAgent) {
+  //   const {
+  //     sku,
+  //     name,
+  //     description,
+  //     category,
+  //     subCategory,
+  //     brand,
+  //     unitPrice,
+  //     costPrice,
+  //     taxRate,
+  //     warehouseLocation,
+  //     barcode,
+  //     minStockLevel,
+  //     maxStockLevel,
+  //     unitOfMeasure,
+  //     initialQuantity = 0,
+  //     storeId, // ← Allow explicit store selection
+  //   } = productData;
 
-    // Validate
-    const sanitizedSku = sku.toUpperCase().trim();
-    const sanitizedName = this.sanitize(name);
-    const sanitizedDescription = description ? this.sanitize(description) : "";
+  //   // Determine which store to use
+  //   let targetStoreId = storeId || userStoreId;
 
-    if (unitPrice <= 0) {
-      throw new AppError("Unit price must be greater than 0", 400);
+  //   // Validate store access
+  //   if (!targetStoreId) {
+  //     throw new AppError("Store selection is required", 400);
+  //   }
+
+  //   // Verify store exists and user has access
+  //   const store = await Store.findById(targetStoreId);
+  //   if (!store) {
+  //     throw new AppError("Store not found", 404);
+  //   }
+
+  //   // Super admin can assign to any store, others only their store
+  //   if (userStoreId && userStoreId.toString() !== targetStoreId.toString()) {
+  //     throw new AppError("You can only create products for your assigned store", 403);
+  //   }
+
+  //   // Validate
+  //   const sanitizedSku = sku.toUpperCase().trim();
+  //   const sanitizedName = this.sanitize(name);
+  //   const sanitizedDescription = description ? this.sanitize(description) : "";
+
+  //   if (unitPrice <= 0) {
+  //     throw new AppError("Unit price must be greater than 0", 400);
+  //   }
+
+  //   if (initialQuantity < 0) {
+  //     throw new AppError("Initial quantity cannot be negative", 400);
+  //   }
+
+  //   // Check if SKU already exists in this store
+  //   const existingProduct = await Product.findOne({
+  //     sku: sanitizedSku,
+  //     storeId: targetStoreId,
+  //   });
+  //   if (existingProduct) {
+  //     throw new AppError(
+  //       `Product with SKU "${sanitizedSku}" already exists in store "${store.name}"`,
+  //       400,
+  //     );
+  //   }
+
+  //   const product = new Product({
+  //     sku: sanitizedSku,
+  //     name: sanitizedName,
+  //     description: sanitizedDescription,
+  //     category,
+  //     subCategory: subCategory || "",
+  //     brand: brand || "",
+  //     unitPrice,
+  //     costPrice: costPrice || 0,
+  //     taxRate: taxRate || 0,
+  //     storeId: targetStoreId,
+  //     warehouseLocation: warehouseLocation || {},
+  //     barcode: barcode || sanitizedSku,
+  //     minStockLevel: minStockLevel || 5,
+  //     maxStockLevel: maxStockLevel || 100,
+  //     unitOfMeasure: unitOfMeasure || "each",
+  //     isActive: true,
+  //   });
+
+  //   await product.save();
+
+  //   // Create initial inventory
+  //   const inventory = new Inventory({
+  //     productId: product._id,
+  //     storeId: targetStoreId,
+  //     quantity: initialQuantity,
+  //     reservedQuantity: 0,
+  //     reorderPoint: minStockLevel || 5,
+  //     warehouseLocation: warehouseLocation || {},
+  //     lastCounted: initialQuantity > 0 ? new Date() : null,
+  //   });
+  //   await inventory.save();
+
+  //   // Log audit
+  //   await this.auditLog(
+  //     userId,
+  //     null,
+  //     "CREATE",
+  //     "Product",
+  //     product._id,
+  //     targetStoreId,
+  //     {
+  //       after: {
+  //         sku: product.sku,
+  //         name: product.name,
+  //         category: product.category,
+  //         unitPrice: product.unitPrice,
+  //         initialQuantity: initialQuantity,
+  //         storeName: store.name,
+  //       },
+  //       metadata: {
+  //         ipAddress: ip,
+  //         userAgent,
+  //         initialQuantity,
+  //         storeId: targetStoreId,
+  //       },
+  //     },
+  //     "INFO",
+  //   );
+
+  //   if (initialQuantity > 0) {
+  //     await this.auditLog(
+  //       userId,
+  //       null,
+  //       "UPDATE",
+  //       "Inventory",
+  //       inventory._id,
+  //       targetStoreId,
+  //       {
+  //         before: { quantity: 0 },
+  //         after: { quantity: initialQuantity },
+  //         metadata: {
+  //           ipAddress: ip,
+  //           userAgent,
+  //           reason: "Initial stock on product creation",
+  //           adjustment: initialQuantity,
+  //           productName: product.name,
+  //           productSku: product.sku,
+  //           storeName: store.name,
+  //         },
+  //       },
+  //       "INFO",
+  //     );
+  //   }
+
+  //   return { product, inventory, store };
+  // }
+
+  // services/productService.js - Fixed createProduct method
+
+async createProduct(productData, userId, userStoreId, ip, userAgent) {
+  const {
+    sku,
+    name,
+    description,
+    category,
+    subCategory,
+    brand,
+    unitPrice,
+    costPrice,
+    taxRate,
+    warehouseLocation,
+    barcode,
+    minStockLevel,
+    maxStockLevel,
+    unitOfMeasure,
+    initialQuantity = 0,
+    storeId, // ← Allow explicit store selection
+  } = productData;
+
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new AppError("User not found", 404);
+  }
+
+  // Determine which store to use
+  let targetStoreId = storeId || userStoreId;
+
+  // Validate store access
+  // If user is SUPER_ADMIN and no storeId provided, they must select one
+  if (user.role === 'SUPER_ADMIN' && !targetStoreId) {
+    throw new AppError("Super Admin must select a store for the product", 400);
+  }
+
+  // Verify store exists
+  const store = await Store.findById(targetStoreId);
+  if (!store) {
+    throw new AppError("Store not found", 404);
+  }
+
+  // ⚠️ FIX: Only check store access for NON-SUPER_ADMIN users
+  // Super Admin can create products for ANY store
+  if (user.role !== 'SUPER_ADMIN') {
+    if (userStoreId && userStoreId.toString() !== targetStoreId.toString()) {
+      throw new AppError("You can only create products for your assigned store", 403);
     }
+  }
 
-    // Validate initial quantity is not negative
-    if (initialQuantity < 0) {
-      throw new AppError("Initial quantity cannot be negative", 400);
-    }
+  // Validate
+  const sanitizedSku = sku.toUpperCase().trim();
+  const sanitizedName = this.sanitize(name);
+  const sanitizedDescription = description ? this.sanitize(description) : "";
 
-    // Check if SKU already exists
-    const existingProduct = await Product.findOne({
-      sku: sanitizedSku,
-      storeId,
-    });
-    if (existingProduct) {
-      throw new AppError(
-        "Product with this SKU already exists in this store",
-        400,
-      );
-    }
+  if (unitPrice <= 0) {
+    throw new AppError("Unit price must be greater than 0", 400);
+  }
 
-    const product = new Product({
-      sku: sanitizedSku,
-      name: sanitizedName,
-      description: sanitizedDescription,
-      category,
-      subCategory: subCategory || "",
-      brand: brand || "",
-      unitPrice,
-      costPrice: costPrice || 0,
-      taxRate: taxRate || 0,
-      storeId,
-      warehouseLocation: warehouseLocation || {},
-      barcode: barcode || sanitizedSku,
-      minStockLevel: minStockLevel || 5,
-      maxStockLevel: maxStockLevel || 100,
-      unitOfMeasure: unitOfMeasure || "each",
-      isActive: true,
-    });
+  if (initialQuantity < 0) {
+    throw new AppError("Initial quantity cannot be negative", 400);
+  }
 
-    await product.save();
+  // Check if SKU already exists in this store
+  const existingProduct = await Product.findOne({
+    sku: sanitizedSku,
+    storeId: targetStoreId,
+  });
+  if (existingProduct) {
+    throw new AppError(
+      `Product with SKU "${sanitizedSku}" already exists in store "${store.name}"`,
+      400,
+    );
+  }
 
-    // Create initial inventory with the provided quantity
-    const inventory = new Inventory({
-      productId: product._id,
-      storeId,
-      quantity: initialQuantity, // ← NEW: Use initialQuantity instead of 0
-      reservedQuantity: 0,
-      reorderPoint: minStockLevel || 5,
-      warehouseLocation: warehouseLocation || {},
-      lastCounted: initialQuantity > 0 ? new Date() : null, // ← NEW: Set lastCounted if quantity > 0
-    });
-    await inventory.save();
+  const product = new Product({
+    sku: sanitizedSku,
+    name: sanitizedName,
+    description: sanitizedDescription,
+    category,
+    subCategory: subCategory || "",
+    brand: brand || "",
+    unitPrice,
+    costPrice: costPrice || 0,
+    taxRate: taxRate || 0,
+    storeId: targetStoreId,
+    warehouseLocation: warehouseLocation || {},
+    barcode: barcode || sanitizedSku,
+    minStockLevel: minStockLevel || 5,
+    maxStockLevel: maxStockLevel || 100,
+    unitOfMeasure: unitOfMeasure || "each",
+    isActive: true,
+  });
 
-    // Log audit
+  await product.save();
+
+  // Create initial inventory
+  const inventory = new Inventory({
+    productId: product._id,
+    storeId: targetStoreId,
+    quantity: initialQuantity,
+    reservedQuantity: 0,
+    reorderPoint: minStockLevel || 5,
+    warehouseLocation: warehouseLocation || {},
+    lastCounted: initialQuantity > 0 ? new Date() : null,
+  });
+  await inventory.save();
+
+  // Log audit
+  await this.auditLog(
+    userId,
+    null,
+    "CREATE",
+    "Product",
+    product._id,
+    targetStoreId,
+    {
+      after: {
+        sku: product.sku,
+        name: product.name,
+        category: product.category,
+        unitPrice: product.unitPrice,
+        initialQuantity: initialQuantity,
+        storeName: store.name,
+      },
+      metadata: {
+        ipAddress: ip,
+        userAgent,
+        initialQuantity,
+        storeId: targetStoreId,
+      },
+    },
+    "INFO",
+  );
+
+  if (initialQuantity > 0) {
     await this.auditLog(
       userId,
       null,
-      "CREATE",
-      "Product",
-      product._id,
-      storeId,
+      "UPDATE",
+      "Inventory",
+      inventory._id,
+      targetStoreId,
       {
-        after: {
-          sku: product.sku,
-          name: product.name,
-          category: product.category,
-          unitPrice: product.unitPrice,
-          initialQuantity: initialQuantity, // ← NEW: Log initial quantity
-        },
+        before: { quantity: 0 },
+        after: { quantity: initialQuantity },
         metadata: {
           ipAddress: ip,
           userAgent,
-          initialQuantity, // ← NEW: Include in metadata
+          reason: "Initial stock on product creation",
+          adjustment: initialQuantity,
+          productName: product.name,
+          productSku: product.sku,
+          storeName: store.name,
         },
       },
       "INFO",
     );
-
-    // If initial quantity was added, log an inventory adjustment
-    if (initialQuantity > 0) {
-      await this.auditLog(
-        userId,
-        null,
-        "UPDATE",
-        "Inventory",
-        inventory._id,
-        storeId,
-        {
-          before: { quantity: 0 },
-          after: { quantity: initialQuantity },
-          metadata: {
-            ipAddress: ip,
-            userAgent,
-            reason: "Initial stock on product creation",
-            adjustment: initialQuantity,
-            productName: product.name,
-            productSku: product.sku,
-          },
-        },
-        "INFO",
-      );
-    }
-
-    return { product, inventory };
   }
 
+  return { product, inventory, store };
+}
+
   /**
-   * Get products with filters
+   * Get products with store-based filtering
    */
   async getProducts(query, user) {
     const {
@@ -155,11 +612,18 @@ class ProductService extends BaseService {
       inStock,
       sortBy = "createdAt",
       sortOrder = "desc",
+      storeId, // ← Filter by specific store
     } = query;
 
     const filter = {};
 
-    if (user.role !== "SUPER_ADMIN") {
+    // Super admin can see all stores or filter by store
+    if (user.role === "SUPER_ADMIN") {
+      if (storeId) {
+        filter.storeId = storeId;
+      }
+    } else {
+      // Non-super admins can only see their store's products
       filter.storeId = user.storeId;
     }
 
@@ -196,8 +660,13 @@ class ProductService extends BaseService {
     if (productIds.length > 0) {
       const inventoryQuery = {
         productId: { $in: productIds },
-        storeId: user.storeId,
       };
+      // If user has a specific store, filter inventory by that store
+      if (filter.storeId) {
+        inventoryQuery.storeId = filter.storeId;
+      } else if (user.storeId) {
+        inventoryQuery.storeId = user.storeId;
+      }
       inventoryData = await Inventory.find(inventoryQuery);
     }
 
@@ -234,38 +703,74 @@ class ProductService extends BaseService {
     };
   }
 
-  /**
-   * Get product by ID
-   */
-  async getProductById(productId, user) {
-    const product = await Product.findById(productId).populate(
-      "storeId",
-      "name code",
-    );
-    if (!product) {
-      throw new AppError("Product not found", 404);
-    }
+/**
+ * Get product by ID with store validation
+ */
+async getProductById(productId, user) {
+  const product = await Product.findById(productId).populate(
+    "storeId",
+    "name code",
+  );
+  if (!product) {
+    throw new AppError("Product not found", 404);
+  }
 
-    const productStoreId = product.storeId._id || product.storeId;
-    const userStoreId = user.storeId._id || user.storeId;
-
-    if (user.role !== "SUPER_ADMIN" && !productStoreId.equals(userStoreId)) {
-      throw new AppError("Access denied", 403);
-    }
-
+  // ✅ FIX: Super Admin bypasses store validation
+  if (user.role === "SUPER_ADMIN") {
+    // Super admin can access any product
     const inventory = await Inventory.findOne({
       productId: product._id,
-      storeId: user.storeId,
+      storeId: product.storeId._id || product.storeId,
     });
-
-    // Get stock movement history
-    const movements = await this._getProductMovements(productId, user.storeId);
-
+    const movements = await this._getProductMovements(productId, product.storeId._id || product.storeId);
     return {
       ...product.toObject(),
       inventory: inventory || { quantity: 0, reservedQuantity: 0 },
       movements,
     };
+  }
+
+  // For non-super-admin users, check store access
+  const productStoreId = product.storeId._id || product.storeId;
+  const userStoreId = user.storeId?._id || user.storeId;
+
+  if (!productStoreId.equals(userStoreId)) {
+    throw new AppError("Access denied to this product", 403);
+  }
+
+  const inventory = await Inventory.findOne({
+    productId: product._id,
+    storeId: productStoreId,
+  });
+
+  const movements = await this._getProductMovements(productId, productStoreId);
+
+  return {
+    ...product.toObject(),
+    inventory: inventory || { quantity: 0, reservedQuantity: 0 },
+    movements,
+  };
+}
+
+  /**
+   * Get user's accessible stores for product creation
+   */
+  async getUserStores(user) {
+    if (user.role === "SUPER_ADMIN") {
+      return await Store.find({ isActive: true })
+        .select("_id name code")
+        .sort({ name: 1 });
+    }
+
+    // For non-super admins, only return their store
+    if (user.storeId) {
+      const store = await Store.findById(user.storeId)
+        .select("_id name code")
+        .lean();
+      return store ? [store] : [];
+    }
+
+    return [];
   }
 
   /**

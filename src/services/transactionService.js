@@ -1119,6 +1119,19 @@ class TransactionService extends BaseService {
    * Create new transaction with items - generates Sales QR
    */
   async createTransactionWithItems(userId, storeId, items, ip, userAgent) {
+     if (!storeId) {
+    throw new AppError(
+      "Store ID is required to create a transaction",
+      400
+    );
+  }
+
+  // Make sure the store actually exists
+  const store = await Store.findById(storeId);
+
+  if (!store) {
+    throw new AppError("Selected store not found", 404);
+  }
     // Generate transaction number
     const count = await Transaction.countDocuments({ storeId });
     const transactionNumber = `STR-${new Date().getFullYear()}-${String(count + 1).padStart(6, "0")}`;
@@ -1249,183 +1262,6 @@ class TransactionService extends BaseService {
 
     return { subtotal, taxTotal, addedItems };
   }
-
-  // ============================================================
-  // QR GENERATION - MINIMAL PAYLOAD
-  // ============================================================
-
-  /**
-   * Generate Sales QR (Step 1)
-   */
-  // async generateSalesQR(transaction, userId, ip, userAgent) {
-  //   if (transaction.items.length === 0) {
-  //     throw new AppError("Transaction has no items", 400);
-  //   }
-
-  //   const qrData = await QRService.generateQR({
-  //     type: "SALES",
-  //     transactionId: transaction._id,
-  //     storeId: transaction.storeId,
-  //     metadata: {
-  //       totalAmount: transaction.totalAmount,
-  //       itemCount: transaction.items?.length,
-  //       transactionNumber: transaction.transactionNumber,
-  //     },
-  //   });
-
-  //   transaction.salesQR = qrData.dataUrl;
-  //   transaction.salesQRData = qrData.qrString;
-  //   transaction.salesQRGeneratedAt = new Date();
-  //   transaction.salesReceiptPrinted = true;
-  //   transaction.status = "SALES_QR";
-  //   transaction.salesStatus = "SALES_QR_PRINTED";
-  //   transaction.qrStatus.salesQRScanned = false;
-  //   await transaction.save();
-
-  //   // Generate receipt data
-  //   const receiptData = await ReceiptService.generateReceiptData(
-  //     transaction,
-  //     "SALES",
-  //   );
-  //   transaction.receiptData = receiptData;
-  //   await transaction.save();
-
-  //   await this.auditLog(
-  //     userId,
-  //     "SALES_ATTENDANT",
-  //     "PRINT",
-  //     "Transaction",
-  //     transaction._id,
-  //     transaction.storeId,
-  //     {
-  //       after: { salesQR: qrData.qrString, status: "SALES_QR" },
-  //       metadata: { ipAddress: ip, userAgent },
-  //     },
-  //   );
-
-  //   await NotificationService.sendTransactionNotification(
-  //     transaction,
-  //     "sales_qr",
-  //   );
-
-  //   return {
-  //     transaction,
-  //     salesQR: qrData.dataUrl,
-  //     salesQRData: qrData.qrString,
-  //     salesQRGeneratedAt: transaction.salesQRGeneratedAt,
-  //     status: transaction.status,
-  //     qrStatus: transaction.qrStatus,
-  //   };
-  // }
-
-  // /**
-  //  * Generate Payment QR (Step 2)
-  //  */
-  // async generatePaymentQR(transaction, userId, ip, userAgent) {
-  //   const qrData = await QRService.generateQR({
-  //     type: "PAYMENT",
-  //     transactionId: transaction._id,
-  //     storeId: transaction.storeId,
-  //     metadata: {
-  //       totalAmount: transaction.totalAmount,
-  //       transactionNumber: transaction.transactionNumber,
-  //     },
-  //   });
-
-  //   transaction.paymentQR = qrData.dataUrl;
-  //   transaction.paymentQRData = qrData.qrString;
-  //   transaction.paymentQRGeneratedAt = new Date();
-  //   transaction.paymentReceiptPrinted = true;
-  //   transaction.status = "PAYMENT_QR";
-  //   transaction.qrStatus.paymentQRScanned = false;
-  //   await transaction.save();
-
-  //   return qrData;
-  // }
-
-  // /**
-  //  * Generate Release QR (Step 3)
-  //  */
-  // async generateReleaseQR(transaction, userId, ip, userAgent) {
-  //   const qrData = await QRService.generateQR({
-  //     type: "RELEASE",
-  //     transactionId: transaction._id,
-  //     storeId: transaction.storeId,
-  //     metadata: {
-  //       totalAmount: transaction.totalAmount,
-  //       transactionNumber: transaction.transactionNumber,
-  //     },
-  //   });
-
-  //   transaction.releaseQR = qrData.dataUrl;
-  //   transaction.releaseQRData = qrData.qrString;
-  //   transaction.releaseQRGeneratedAt = new Date();
-  //   transaction.status = "RELEASE_QR";
-  //   transaction.qrStatus.releaseQRScanned = false;
-  //   await transaction.save();
-
-  //   return qrData;
-  // }
-
-  // /**
-  //  * Generate Invoice QR (Step 4)
-  //  */
-  // async generateInvoiceQR(transaction, userId, ip, userAgent) {
-  //   const qrData = await QRService.generateQR({
-  //     type: "INVOICE",
-  //     transactionId: transaction._id,
-  //     storeId: transaction.storeId,
-  //     metadata: {
-  //       totalAmount: transaction.totalAmount,
-  //       transactionNumber: transaction.transactionNumber,
-  //       invoiceNumber: transaction.finalInvoiceNumber,
-  //     },
-  //   });
-
-  //   transaction.invoiceQR = qrData.dataUrl;
-  //   transaction.invoiceQRData = qrData.qrString;
-  //   transaction.invoiceQRGeneratedAt = new Date();
-  //   transaction.finalInvoicePrinted = true;
-  //   // transaction.status = "INVOICE_QR";
-  //   // transaction.qrStatus.invoiceQRScanned = false;
-  //   await transaction.save();
-
-  //   // Generate final receipt data
-  //   const receiptData = await ReceiptService.generateReceiptData(
-  //     transaction,
-  //     "FINAL",
-  //   );
-  //   transaction.receiptData = receiptData;
-  //   await transaction.save();
-
-  //   await this.auditLog(
-  //     userId,
-  //     "WAREHOUSE_STAFF",
-  //     "PRINT",
-  //     "Transaction",
-  //     transaction._id,
-  //     transaction.storeId,
-  //     {
-  //       after: { invoiceQR: qrData.qrString, status: "INVOICE_QR" },
-  //       metadata: { ipAddress: ip, userAgent },
-  //     },
-  //   );
-
-  //   await NotificationService.sendTransactionNotification(
-  //     transaction,
-  //     "invoice",
-  //   );
-
-  //   return qrData;
-  // }
-
-
-  // services/transactionService.js - QR Generation Section
-// (Only showing the QR generation methods that need fixing)
-
-  // ============================================================
-  // QR GENERATION - MINIMAL PAYLOAD
-  // ============================================================
 
   /**
    * Generate Sales QR (Step 1)
@@ -2080,78 +1916,324 @@ class TransactionService extends BaseService {
   /**
    * Validate any QR and determine next action
    */
-  async validateQRAndGetAction(qrData, user) {
-    let result;
+  // async validateQRAndGetAction(qrData, user) {
+  //   let result;
 
+  //   try {
+  //     result = await QRService.validateAndGetTransaction(qrData);
+  //   } catch (err) {
+  //     return {
+  //       isValid: false,
+  //       error: err.message,
+  //     };
+  //   }
+
+  //   const { transaction, qrType } = result;
+
+  //   const transactionStoreId = transaction.storeId._id || transaction.storeId;
+  //   const userStoreId = user.storeId._id || user.storeId;
+
+  //   if (
+  //     user.role !== "SUPER_ADMIN" &&
+  //     user.role !== "ADMIN" &&
+  //     !transactionStoreId.equals(userStoreId)
+  //   ) {
+  //     return {
+  //       isValid: false,
+  //       error: "Access denied to this transaction",
+  //     };
+  //   }
+
+  //   let nextAction = null;
+  //   let nextStep = null;
+
+  //   switch (qrType) {
+  //     case "SALES":
+  //       if (transaction.status === "SALES_QR") {
+  //         nextAction = "PROCEED_TO_PAYMENT";
+  //         nextStep = "PAYMENT";
+  //       }
+  //       break;
+  //     case "PAYMENT":
+  //       if (transaction.status === "PAYMENT_QR") {
+  //         nextAction = "PROCEED_TO_WAREHOUSE";
+  //         nextStep = "RELEASE";
+  //       }
+  //       break;
+  //     case "RELEASE":
+  //       if (transaction.status === "RELEASE_QR") {
+  //         nextAction = "COMPLETE_TRANSACTION";
+  //         nextStep = "COMPLETE";
+  //       }
+  //       break;
+  //     // case "INVOICE":
+  //     //   if (transaction.status === "INVOICE_QR") {
+  //     //     nextAction = "COMPLETE_TRANSACTION";
+  //     //     nextStep = "COMPLETE";
+  //     //   }
+  //     //   break;
+  //   }
+
+  //   const fullTransaction = await this.populateTransaction(transaction._id);
+
+  //   return {
+  //     transaction: fullTransaction,
+  //     qrType,
+  //     nextAction,
+  //     nextStep,
+  //     receiptData: transaction.receiptData || null,
+  //     isValid: true,
+  //     status: transaction.status,
+  //     qrStatus: transaction.qrStatus,
+  //   };
+  // }
+
+  // services/transactionService.js
+
+/**
+ * Validate any QR and determine next action
+ * FIXED: Properly handles Super Admin store validation
+ */
+// async validateQRAndGetAction(qrData, user) {
+//   let result;
+
+//   try {
+//     result = await QRService.validateAndGetTransaction(qrData);
+//   } catch (err) {
+//     return {
+//       isValid: false,
+//       error: err.message,
+//     };
+//   }
+
+//   const { transaction, qrType } = result;
+
+//   // ✅ FIX: Safe store ID extraction with fallbacks
+//   const transactionStoreId = transaction.storeId?._id?.toString() || 
+//                             transaction.storeId?.toString() || 
+//                             transaction.storeId;
+
+//   // ✅ FIX: Super Admin bypasses store validation
+//   if (user.role === "SUPER_ADMIN") {
+//     // Super Admin can access any transaction
+//     // Just proceed with validation
+//   } else {
+//     // Non-Super Admin users must belong to the same store
+//     const userStoreId = user.storeId?._id?.toString() || 
+//                         user.storeId?.toString() || 
+//                         user.storeId;
+
+//     if (!userStoreId || !transactionStoreId || userStoreId !== transactionStoreId) {
+//       return {
+//         isValid: false,
+//         error: "Access denied to this transaction",
+//       };
+//     }
+//   }
+
+//   let nextAction = null;
+//   let nextStep = null;
+
+//   switch (qrType) {
+//     case "SALES":
+//       if (transaction.status === "SALES_QR") {
+//         nextAction = "PROCEED_TO_PAYMENT";
+//         nextStep = "PAYMENT";
+//       }
+//       break;
+//     case "PAYMENT":
+//       if (transaction.status === "PAYMENT_QR") {
+//         nextAction = "PROCEED_TO_WAREHOUSE";
+//         nextStep = "RELEASE";
+//       }
+//       break;
+//     case "RELEASE":
+//       if (transaction.status === "RELEASE_QR" || transaction.status === "COMPLETED") {
+//         nextAction = "COMPLETE_TRANSACTION";
+//         nextStep = "COMPLETE";
+//       }
+//       break;
+//     case "INVOICE":
+//       if (transaction.status === "COMPLETED" || transaction.status === "INVOICE_QR") {
+//         nextAction = "TRANSACTION_COMPLETE";
+//         nextStep = "COMPLETE";
+//       }
+//       break;
+//     default:
+//       // Unknown QR type
+//       return {
+//         isValid: false,
+//         error: "Unknown QR code type",
+//       };
+//   }
+
+//   // If no next action is determined, still return the transaction info
+//   // but with a status message
+//   const fullTransaction = await this.populateTransaction(transaction._id);
+
+//   return {
+//     transaction: fullTransaction,
+//     qrType,
+//     nextAction: nextAction || "VIEW_DETAILS",
+//     nextStep: nextStep || "VIEW",
+//     receiptData: transaction.receiptData || null,
+//     isValid: true,
+//     status: transaction.status,
+//     qrStatus: transaction.qrStatus,
+//   };
+// }
+
+// services/transactionService.js
+
+/**
+ * Validate any QR and determine next action
+ * FIXED: Properly handles Super Admin store validation
+ */
+async validateQRAndGetAction(qrData, user) {
+  let result;
+
+  try {
+    result = await QRService.validateAndGetTransaction(qrData);
+  } catch (err) {
+    console.error('[validateQRAndGetAction] QR validation error:', err);
+    return {
+      isValid: false,
+      error: err.message || "Invalid QR code",
+    };
+  }
+
+  // If QR validation failed, return early
+  if (!result || !result.transaction) {
+    return {
+      isValid: false,
+      error: "Invalid QR code data",
+    };
+  }
+
+  const { transaction, qrType } = result;
+
+  // ✅ FIX: Safe store ID extraction with fallbacks
+  let transactionStoreId = null;
+  try {
+    transactionStoreId = transaction.storeId?._id?.toString() || 
+                         transaction.storeId?.toString() || 
+                         transaction.storeId;
+  } catch (err) {
+    console.error('[validateQRAndGetAction] Error extracting store ID:', err);
+  }
+
+  // ✅ FIX: Super Admin bypasses store validation
+  if (user.role === "SUPER_ADMIN") {
+    // Super Admin can access any transaction - proceed
+    console.log('[validateQRAndGetAction] Super Admin accessing transaction:', transaction._id);
+  } else {
+    // Non-Super Admin users must belong to the same store
+    let userStoreId = null;
     try {
-      result = await QRService.validateAndGetTransaction(qrData);
+      userStoreId = user.storeId?._id?.toString() || 
+                    user.storeId?.toString() || 
+                    user.storeId;
     } catch (err) {
-      return {
-        isValid: false,
-        error: err.message,
-      };
+      console.error('[validateQRAndGetAction] Error extracting user store ID:', err);
     }
 
-    const { transaction, qrType } = result;
-
-    const transactionStoreId = transaction.storeId._id || transaction.storeId;
-    const userStoreId = user.storeId._id || user.storeId;
-
-    if (
-      user.role !== "SUPER_ADMIN" &&
-      user.role !== "ADMIN" &&
-      !transactionStoreId.equals(userStoreId)
-    ) {
+    if (!userStoreId || !transactionStoreId || userStoreId !== transactionStoreId) {
       return {
         isValid: false,
         error: "Access denied to this transaction",
       };
     }
+  }
 
-    let nextAction = null;
-    let nextStep = null;
+  // Determine next action based on QR type and transaction status
+  let nextAction = null;
+  let nextStep = null;
 
-    switch (qrType) {
-      case "SALES":
-        if (transaction.status === "SALES_QR") {
-          nextAction = "PROCEED_TO_PAYMENT";
-          nextStep = "PAYMENT";
-        }
-        break;
-      case "PAYMENT":
-        if (transaction.status === "PAYMENT_QR") {
-          nextAction = "PROCEED_TO_WAREHOUSE";
-          nextStep = "RELEASE";
-        }
-        break;
-      case "RELEASE":
-        if (transaction.status === "RELEASE_QR") {
-          nextAction = "COMPLETE_TRANSACTION";
-          nextStep = "COMPLETE";
-        }
-        break;
-      // case "INVOICE":
-      //   if (transaction.status === "INVOICE_QR") {
-      //     nextAction = "COMPLETE_TRANSACTION";
-      //     nextStep = "COMPLETE";
-      //   }
-      //   break;
-    }
+  // Normalize status for comparison
+  const status = transaction.status || 'UNKNOWN';
 
+  switch (qrType) {
+    case "SALES":
+      if (status === "SALES_QR" || status === "PENDING") {
+        nextAction = "PROCEED_TO_PAYMENT";
+        nextStep = "PAYMENT";
+      } else if (status === "PAID" || status === "PAYMENT_QR") {
+        nextAction = "PROCEED_TO_WAREHOUSE";
+        nextStep = "RELEASE";
+      } else if (status === "COMPLETED") {
+        nextAction = "VIEW_DETAILS";
+        nextStep = "VIEW";
+      }
+      break;
+      
+    case "PAYMENT":
+      if (status === "PAYMENT_QR" || status === "PAID") {
+        nextAction = "PROCEED_TO_WAREHOUSE";
+        nextStep = "RELEASE";
+      } else if (status === "RELEASE_QR" || status === "COMPLETED") {
+        nextAction = "VIEW_DETAILS";
+        nextStep = "VIEW";
+      }
+      break;
+      
+    case "RELEASE":
+      if (status === "RELEASE_QR" || status === "COMPLETED") {
+        nextAction = "PROCEED_TO_INVOICE";
+        nextStep = "INVOICE";
+      } else if (status === "INVOICE_QR") {
+        nextAction = "COMPLETE_TRANSACTION";
+        nextStep = "COMPLETE";
+      }
+      break;
+      
+    case "INVOICE":
+      if (status === "INVOICE_QR" || status === "COMPLETED") {
+        nextAction = "COMPLETE_TRANSACTION";
+        nextStep = "COMPLETE";
+      }
+      break;
+      
+    default:
+      // Unknown QR type - still return transaction info
+      nextAction = "VIEW_DETAILS";
+      nextStep = "VIEW";
+  }
+
+  // If no next action is determined, default to view details
+  if (!nextAction) {
+    nextAction = "VIEW_DETAILS";
+    nextStep = "VIEW";
+  }
+
+  try {
+    // Get full transaction with populated data
     const fullTransaction = await this.populateTransaction(transaction._id);
+    
+    if (!fullTransaction) {
+      return {
+        isValid: false,
+        error: "Transaction not found",
+      };
+    }
 
     return {
       transaction: fullTransaction,
       qrType,
       nextAction,
       nextStep,
-      receiptData: transaction.receiptData || null,
+      receiptData: fullTransaction.receiptData || null,
       isValid: true,
-      status: transaction.status,
-      qrStatus: transaction.qrStatus,
+      status: fullTransaction.status || status,
+      qrStatus: fullTransaction.qrStatus || transaction.qrStatus || {},
+    };
+  } catch (error) {
+    console.error('[validateQRAndGetAction] Error populating transaction:', error);
+    return {
+      isValid: false,
+      error: "Error loading transaction details",
     };
   }
-
+}
   // ============================================================
   // QUERY METHODS
   // ============================================================
@@ -2183,104 +2265,217 @@ class TransactionService extends BaseService {
   /**
    * Get transaction by ID with full details
    */
-  async getTransactionById(id, user) {
-    const transaction = await this.populateTransaction(id);
+  // async getTransactionById(id, user) {
+  //   const transaction = await this.populateTransaction(id);
 
-    if (!transaction) {
-      throw new AppError("Transaction not found", 404);
-    }
+  //   if (!transaction) {
+  //     throw new AppError("Transaction not found", 404);
+  //   }
 
-    const transactionStoreId = transaction.storeId._id || transaction.storeId;
-    const userStoreId = user.storeId._id || user.storeId;
+  //   const transactionStoreId = transaction.storeId._id || transaction.storeId;
+  //   const userStoreId = user.storeId._id || user.storeId;
 
-    if (
-      user.role !== "SUPER_ADMIN" &&
-      user.role !== "ADMIN" &&
-      !transactionStoreId.equals(userStoreId)
-    ) {
-      throw new AppError("Access denied", 403);
-    }
+  //   if (
+  //     user.role !== "SUPER_ADMIN" &&
+  //     user.role !== "ADMIN" &&
+  //     !transactionStoreId.equals(userStoreId)
+  //   ) {
+  //     throw new AppError("Access denied", 403);
+  //   }
 
+  //   return transaction;
+  // }
+// services/transactionService.js
+
+/**
+ * Get transaction by ID with full details
+ */
+async getTransactionById(id, user) {
+  const transaction = await this.populateTransaction(id);
+
+  if (!transaction) {
+    throw new AppError("Transaction not found", 404);
+  }
+
+  // ✅ FIX: Super Admin bypasses store validation
+  if (user.role === "SUPER_ADMIN") {
     return transaction;
   }
 
+  const transactionStoreId = transaction.storeId._id || transaction.storeId;
+  const userStoreId = user.storeId?._id || user.storeId;
+
+  if (!transactionStoreId.equals(userStoreId)) {
+    throw new AppError("Access denied", 403);
+  }
+
+  return transaction;
+}
   /**
    * Get transactions with filters
    */
-  async getTransactions(query, user) {
-    const { page = 1, limit = 20, status, startDate, endDate, storeId } = query;
+  // async getTransactions(query, user) {
+  //   const { page = 1, limit = 20, status, startDate, endDate, storeId } = query;
 
-    const filter = {};
+  //   const filter = {};
 
+  //   const userStoreId = user.storeId?._id || user.storeId;
+
+  //   if (user.role === "SUPER_ADMIN") {
+  //     // Super Admin can optionally filter by store
+  //     if (storeId) {
+  //       filter.storeId = storeId;
+  //     }
+  //   } else {
+  //     // Everyone else is restricted to their own store
+  //     filter.storeId = userStoreId;
+
+  //     // Sales attendants only see their own transactions
+  //     if (user.role === "SALES_ATTENDANT") {
+  //       // filter.salesAttendantId = user._id;
+  //     }
+
+  //     // Finance cashier only sees payments they processed
+  //     if (user.role === "FINANCE_CASHIER") {
+  //       // filter.financeAttendantId = user._id;
+  //     }
+
+  //     // Warehouse staff only sees releases they handled
+  //     if (user.role === "WAREHOUSE_STAFF") {
+  //       // filter.warehouseStaffId = user._id;
+  //     }
+  //   }
+
+  //   if (status) filter.status = status;
+
+  //   if (startDate || endDate) {
+  //     filter.createdAt = {};
+
+  //     if (startDate) filter.createdAt.$gte = new Date(startDate);
+
+  //     if (endDate) filter.createdAt.$lte = new Date(endDate);
+  //   }
+
+  //   const skip = (page - 1) * limit;
+
+  //   const [transactions, total] = await Promise.all([
+  //     Transaction.find(filter)
+  //       .populate({
+  //         path: "items",
+  //         populate: {
+  //           path: "productId",
+  //           select:
+  //             "name sku description category brand unitPrice taxRate warehouseLocation",
+  //         },
+  //       })
+  //       .populate("salesAttendantId", "firstName lastName")
+  //       .populate("financeAttendantId", "firstName lastName")
+  //       .populate("warehouseStaffId", "firstName lastName")
+  //       .sort({ createdAt: -1 })
+  //       .skip(skip)
+  //       .limit(Number(limit)),
+
+  //     Transaction.countDocuments(filter),
+  //   ]);
+
+  //   return {
+  //     transactions,
+  //     pagination: {
+  //       page: Number(page),
+  //       limit: Number(limit),
+  //       total,
+  //       pages: Math.ceil(total / limit),
+  //     },
+  //   };
+  // }
+
+
+  // services/transactionService.js
+
+/**
+ * Get transactions with filters
+ */
+async getTransactions(query, user) {
+  const { page = 1, limit = 20, status, startDate, endDate, storeId } = query;
+
+  const filter = {};
+
+  // ✅ FIX: Super Admin can see all transactions or filter by store
+  if (user.role === "SUPER_ADMIN") {
+    // Super Admin can optionally filter by store
+    if (storeId) {
+      filter.storeId = storeId;
+    }
+  } else {
+    // Everyone else is restricted to their own store
     const userStoreId = user.storeId?._id || user.storeId;
-
-    if (user.role === "SUPER_ADMIN") {
-      // Super Admin can optionally filter by store
-      if (storeId) {
-        filter.storeId = storeId;
-      }
-    } else {
-      // Everyone else is restricted to their own store
+    if (userStoreId) {
       filter.storeId = userStoreId;
+    } else {
+      // If user has no storeId and is not super admin, return empty
+      return {
+        transactions: [],
+        pagination: {
+          page: Number(page),
+          limit: Number(limit),
+          total: 0,
+          pages: 0,
+        },
+      };
+    }
 
+    // Role-based filtering
+    if (user.role === "SALES_ATTENDANT") {
       // Sales attendants only see their own transactions
-      if (user.role === "SALES_ATTENDANT") {
-        // filter.salesAttendantId = user._id;
-      }
-
-      // Finance cashier only sees payments they processed
-      if (user.role === "FINANCE_CASHIER") {
-        // filter.financeAttendantId = user._id;
-      }
-
-      // Warehouse staff only sees releases they handled
-      if (user.role === "WAREHOUSE_STAFF") {
-        // filter.warehouseStaffId = user._id;
-      }
+      filter.salesAttendantId = user._id;
     }
-
-    if (status) filter.status = status;
-
-    if (startDate || endDate) {
-      filter.createdAt = {};
-
-      if (startDate) filter.createdAt.$gte = new Date(startDate);
-
-      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    if (user.role === "FINANCE_CASHIER") {
+      filter.financeAttendantId = user._id;
     }
-
-    const skip = (page - 1) * limit;
-
-    const [transactions, total] = await Promise.all([
-      Transaction.find(filter)
-        .populate({
-          path: "items",
-          populate: {
-            path: "productId",
-            select:
-              "name sku description category brand unitPrice taxRate warehouseLocation",
-          },
-        })
-        .populate("salesAttendantId", "firstName lastName")
-        .populate("financeAttendantId", "firstName lastName")
-        .populate("warehouseStaffId", "firstName lastName")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(Number(limit)),
-
-      Transaction.countDocuments(filter),
-    ]);
-
-    return {
-      transactions,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total,
-        pages: Math.ceil(total / limit),
-      },
-    };
+    if (user.role === "WAREHOUSE_STAFF") {
+      filter.warehouseStaffId = user._id;
+    }
   }
+
+  if (status) filter.status = status;
+
+  if (startDate || endDate) {
+    filter.createdAt = {};
+    if (startDate) filter.createdAt.$gte = new Date(startDate);
+    if (endDate) filter.createdAt.$lte = new Date(endDate);
+  }
+
+  const skip = (page - 1) * limit;
+
+  const [transactions, total] = await Promise.all([
+    Transaction.find(filter)
+      .populate({
+        path: "items",
+        populate: {
+          path: "productId",
+          select:
+            "name sku description category brand unitPrice taxRate warehouseLocation",
+        },
+      })
+      .populate("salesAttendantId", "firstName lastName")
+      .populate("financeAttendantId", "firstName lastName")
+      .populate("warehouseStaffId", "firstName lastName")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limit)),
+    Transaction.countDocuments(filter),
+  ]);
+
+  return {
+    transactions,
+    pagination: {
+      page: Number(page),
+      limit: Number(limit),
+      total,
+      pages: Math.ceil(total / limit),
+    },
+  };
+}
   /**
    * Get transaction by QR code (for scanning)
    */

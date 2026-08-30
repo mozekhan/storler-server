@@ -734,9 +734,44 @@ const { AppError } = require("../middleware/errorHandler");
 /**
  * Create transaction with items (generates Sales QR)
  */
+// exports.createTransactionWithItems = async (req, res) => {
+//   try {
+//     const { items } = req.body;
+
+//     if (!items || !Array.isArray(items) || items.length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Items array is required",
+//       });
+//     }
+
+//     const result = await TransactionService.createTransactionWithItems(
+//       req.user._id,
+//       req.user.storeId,
+//       items,
+//       req.ip,
+//       req.headers["user-agent"],
+//     );
+
+//     res.status(201).json({
+//       success: true,
+//       data: result,
+//       message: `Transaction created with ${items.length} items. Sales QR generated.`,
+//     });
+//   } catch (error) {
+//     res.status(error.statusCode || 500).json({
+//       success: false,
+//       message: error.message,
+//     });
+//   }
+// };
+
+/**
+ * Create transaction with items (generates Sales QR)
+ */
 exports.createTransactionWithItems = async (req, res) => {
   try {
-    const { items } = req.body;
+    const { items, storeId: requestedStoreId } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -745,13 +780,41 @@ exports.createTransactionWithItems = async (req, res) => {
       });
     }
 
-    const result = await TransactionService.createTransactionWithItems(
-      req.user._id,
-      req.user.storeId,
-      items,
-      req.ip,
-      req.headers["user-agent"],
-    );
+    let storeId;
+
+    // SUPER_ADMIN must use the explicitly selected store
+    if (req.user.role === "SUPER_ADMIN") {
+      storeId =
+        requestedStoreId ||
+        req.user.currentStoreId?._id ||
+        req.user.currentStoreId;
+
+      if (!storeId) {
+        return res.status(400).json({
+          success: false,
+          message: "Store ID is required. Please select a store.",
+        });
+      }
+    } else {
+      // Other users use their assigned store
+      storeId = req.user.storeId?._id || req.user.storeId;
+
+      if (!storeId) {
+        return res.status(400).json({
+          success: false,
+          message: "User is not assigned to a store.",
+        });
+      }
+    }
+
+    const result =
+      await TransactionService.createTransactionWithItems(
+        req.user._id,
+        storeId,
+        items,
+        req.ip,
+        req.headers["user-agent"]
+      );
 
     res.status(201).json({
       success: true,
@@ -759,6 +822,8 @@ exports.createTransactionWithItems = async (req, res) => {
       message: `Transaction created with ${items.length} items. Sales QR generated.`,
     });
   } catch (error) {
+    console.error("Create transaction error:", error);
+
     res.status(error.statusCode || 500).json({
       success: false,
       message: error.message,
@@ -1023,6 +1088,47 @@ exports.getTransactionQRs = async (req, res) => {
 /**
  * Validate any QR and determine next action
  */
+// exports.validateQR = async (req, res) => {
+//   try {
+//     const { qrData } = req.body;
+    
+//     if (!qrData) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "QR data is required",
+//       });
+//     }
+
+//     const result = await TransactionService.validateQRAndGetAction(
+//       qrData,
+//       req.user,
+//     );
+
+//     if (!result.isValid) {
+//       return res.status(400).json({
+//         success: false,
+//         message: result.error || "Invalid QR code",
+//       });
+//     }
+
+//     res.json({
+//       success: true,
+//       data: result,
+//     });
+//   } 
+//   catch (error) {
+//     res.status(error.statusCode || 500).json({
+//       success: false,
+//       message: error.message,
+//     });
+//   }
+// };
+
+// controllers/transactionController.js
+
+/**
+ * Validate any QR and determine next action
+ */
 exports.validateQR = async (req, res) => {
   try {
     const { qrData } = req.body;
@@ -1034,27 +1140,53 @@ exports.validateQR = async (req, res) => {
       });
     }
 
+    console.log('[validateQR] Validating QR for user:', req.user._id, 'role:', req.user.role);
+
     const result = await TransactionService.validateQRAndGetAction(
       qrData,
       req.user,
     );
 
-    if (!result.isValid) {
+    // ✅ FIX: Always return a consistent response structure
+    if (!result || !result.isValid) {
       return res.status(400).json({
         success: false,
-        message: result.error || "Invalid QR code",
+        message: result?.error || "Invalid QR code",
+        data: result || null,
       });
     }
 
-    res.json({
+    // ✅ FIX: Ensure transaction has required fields
+    if (!result.transaction || !result.transaction._id) {
+      console.error('[validateQR] Transaction missing required fields:', result);
+      return res.status(500).json({
+        success: false,
+        message: "Invalid transaction data from QR",
+      });
+    }
+
+    // ✅ FIX: Return success with clean data
+    return res.json({
       success: true,
-      data: result,
+      data: {
+        transaction: result.transaction,
+        qrType: result.qrType,
+        nextAction: result.nextAction,
+        nextStep: result.nextStep,
+        receiptData: result.receiptData,
+        isValid: result.isValid,
+        status: result.status,
+        qrStatus: result.qrStatus,
+      },
     });
-  } 
-  catch (error) {
-    res.status(error.statusCode || 500).json({
+  } catch (error) {
+    console.error('[validateQR] Error:', error);
+    
+    // ✅ FIX: Return proper error response
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message,
+      message: error.message || "Failed to validate QR code",
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     });
   }
 };

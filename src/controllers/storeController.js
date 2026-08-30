@@ -125,24 +125,52 @@ exports.deleteStore = async (req, res) => {
 /**
  * Get store statistics
  */
+// exports.getStoreStats = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+    
+//     // Check access
+//     await StoreService.validateStoreAccess(id, req.user);
+    
+//     // const stats = await StoreService.getStoreStats(id);
+//     const stats = await StoreService.getStoreStats(id, req.user);
+
+//     res.json({
+//       success: true,
+//       data: stats
+//     });
+//   } catch (error) {
+//     res.status(error.statusCode || 500).json({
+//       success: false,
+//       message: error.message
+//     });
+//   }
+// };
+
+// controllers/storeController.js
+
+/**
+ * Get store statistics
+ */
 exports.getStoreStats = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Check access
-    await StoreService.validateStoreAccess(id, req.user);
-    
-    // const stats = await StoreService.getStoreStats(id);
+
+    // ✅ FIX: Super Admin bypasses store access validation
+    if (req.user.role !== "SUPER_ADMIN") {
+      await StoreService.validateStoreAccess(id, req.user);
+    }
+
     const stats = await StoreService.getStoreStats(id, req.user);
 
     res.json({
       success: true,
-      data: stats
+      data: stats,
     });
   } catch (error) {
     res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };

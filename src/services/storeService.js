@@ -924,13 +924,34 @@ class StoreService extends BaseService {
       },
     };
   }
- 
+
   /**
    * Get store options for dropdowns - STORE SPECIFIC
    */
+  // async getStoreOptions(user) {
+  //   const filter = { isActive: true };
+
+  //   if (user.role !== "SUPER_ADMIN") {
+  //     filter._id = user.storeId;
+  //   }
+
+  //   const stores = await Store.find(filter)
+  //     .select("_id name code")
+  //     .sort({ name: 1 });
+
+  //   return stores.map((store) => ({
+  //     value: store._id,
+  //     label: `${store.name} (${store.code})`,
+  //     code: store.code,
+  //   }));
+  // }
+
+  // services/storeService.js - getStoreOptions method
+
   async getStoreOptions(user) {
     const filter = { isActive: true };
 
+    // ✅ FIX: Super admin sees ALL stores
     if (user.role !== "SUPER_ADMIN") {
       filter._id = user.storeId;
     }
@@ -975,9 +996,46 @@ class StoreService extends BaseService {
   //   return false;
   // }
 
-  hasStoreAccess(user, storeId) {
+  // hasStoreAccess(user, storeId) {
+  //   if (!user) return false;
+
+  //   if (user.role === "SUPER_ADMIN") {
+  //     return true;
+  //   }
+
+  //   if (!storeId) {
+  //     return false;
+  //   }
+
+  //   const requestedStoreId = storeId.toString();
+
+  //   // Handle populated or unpopulated storeId
+  //   const userStoreId =
+  //     user.storeId?._id?.toString() ||
+  //     user.storeId?.toString() ||
+  //     user.currentStoreId?.toString();
+
+  //   if (userStoreId === requestedStoreId) {
+  //     return true;
+  //   }
+
+  //   if (Array.isArray(user.assignedStores)) {
+  //     return user.assignedStores.some((store) => {
+  //       const id = store?._id?.toString() || store?.toString();
+
+  //       return id === requestedStoreId;
+  //     });
+  //   }
+
+  //   return false;
+  // }
+
+  // services/storeService.js - Already correct
+
+hasStoreAccess(user, storeId) {
   if (!user) return false;
 
+  // ✅ Super Admin always has access
   if (user.role === "SUPER_ADMIN") {
     return true;
   }
@@ -999,11 +1057,8 @@ class StoreService extends BaseService {
   }
 
   if (Array.isArray(user.assignedStores)) {
-    return user.assignedStores.some(store => {
-      const id =
-        store?._id?.toString() ||
-        store?.toString();
-
+    return user.assignedStores.some((store) => {
+      const id = store?._id?.toString() || store?.toString();
       return id === requestedStoreId;
     });
   }
@@ -1014,11 +1069,32 @@ class StoreService extends BaseService {
   /**
    * Get user's accessible stores
    */
+  // async getUserStores(user) {
+  //   if (user.role === "SUPER_ADMIN") {
+  //     return await Store.find({ isActive: true }).select("_id name code");
+  //   }
+
+  //   const storeIds = [];
+  //   if (user.storeId) storeIds.push(user.storeId);
+  //   if (user.assignedStores) storeIds.push(...user.assignedStores);
+
+  //   if (storeIds.length === 0) return [];
+
+  //   return await Store.find({
+  //     _id: { $in: storeIds },
+  //     isActive: true,
+  //   }).select("_id name code");
+  // }
+
+  // services/storeService.js - getUserStores method
+
   async getUserStores(user) {
+    // ✅ FIX: Super admin gets ALL active stores
     if (user.role === "SUPER_ADMIN") {
       return await Store.find({ isActive: true }).select("_id name code");
     }
 
+    // For non-super admin users
     const storeIds = [];
     if (user.storeId) storeIds.push(user.storeId);
     if (user.assignedStores) storeIds.push(...user.assignedStores);
@@ -1059,6 +1135,21 @@ class StoreService extends BaseService {
       store: store,
     };
   }
-}
 
+  /**
+   * Get all active stores (for super admin)
+   */
+  async getAllStores() {
+    return await Store.find({ isActive: true })
+      .select("_id name code address currency taxRate")
+      .sort({ name: 1 });
+  }
+
+  /**
+   * Get store count for validation
+   */
+  async getStoreCount() {
+    return await Store.countDocuments({ isActive: true });
+  }
+}
 module.exports = new StoreService();
